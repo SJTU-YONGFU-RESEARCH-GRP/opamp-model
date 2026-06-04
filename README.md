@@ -1,14 +1,52 @@
 # opamp-model
 
-Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductance (Gm)** behavioral models with Python, Verilog-A, and SPICE testbenches.
+[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-green?logo=creativecommons&logoColor=white)](https://creativecommons.org/licenses/by/4.0/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776ab.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue?logo=semver&logoColor=white)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model)
 
-**Status:** Phases 1–4 — AC/STB, noise, PSRR/CMRR, slew, THD across **peer engines** (Python, ngspice, Spectre each run independently; same macromodel spec in `MODEL.md`). See [../PLAN.md](../PLAN.md) for Phases 5–6.
+Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductance (Gm)** behavioral models with a Python package, Verilog-A shells, and SPICE/Spectre testbenches. Peer engines (Python, ngspice, Spectre) implement the same macromodel equations documented in [MODEL.md](MODEL.md).
+
+**Repository:** [SJTU-YONGFU-RESEARCH-GRP/amplifier-model](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model) (this package lives in the `opamp-model/` directory)
+
+- **License:** CC BY 4.0 (see [LICENSE](LICENSE))
+- **Roadmap:** [../PLAN.md](../PLAN.md) (Phases 5–6: TIA/Gm benches, cross-engine comparison)
+
+**Status:** Phases 1–4 — AC/STB, noise, CMRR/PSRR, slew, and THD benches across Python; ngspice and Spectre for small-signal benches when installed.
+
+## Table of contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+  - [Run a single bench](#run-a-single-bench)
+  - [Run all benches](#run-all-benches)
+- [Python API](#python-api)
+- [Scripts and CLI](#scripts-and-cli)
+- [Multi-engine workflow](#multi-engine-workflow)
+- [Metrics and outputs](#metrics-and-outputs)
+- [Project layout](#project-layout)
+- [Documentation](#documentation)
+- [Development](#development)
+- [Independence](#independence)
+- [License](#license)
+
+## Features
+
+| Area | What is included |
+| --- | --- |
+| **Models** | Voltage op-amp (dominant-pole core, CMRR/PSRR, impedance, noise, slew, weak nonlinearity); TIA and Gm configs and Verilog-A shells (Phase 0) |
+| **Engines** | `python` (closed-form / numerical), `ngspice` (netlists under `testbench/ngspice/`), `spectre` (Verilog-A + `testbench/spectre/`) |
+| **Benches** | `run_ac.py`, `run_stb.py`, `run_noise.py`, `run_psrr.py`, `run_slew.py`, `run_thd.py` |
+| **Artifacts** | Per-bench `*_REPORT.md`, SVG plots, CSV sweeps, `opamp_metrics.json`, engine-level `REPORT.md` |
+
+No engine is treated as golden: each simulator must produce its own curves and metrics (see [reference/bench_spec.md](reference/bench_spec.md)).
 
 ## Requirements
 
-- Python 3.10+
-- NumPy, Matplotlib, PyYAML (installed automatically)
-- Optional (later phases): Cadence Spectre, ngspice
+- **Python** 3.10+ (NumPy, Matplotlib, PyYAML — installed via `pyproject.toml`)
+- **Optional:** [ngspice](https://ngspice.sourceforge.io/) on `PATH` for `testbench/ngspice/` netlists
+- **Optional:** Cadence Spectre on `PATH` for `testbench/spectre/` and `veriloga/configurable_opamp.va`
 
 ## Installation
 
@@ -18,47 +56,178 @@ cd opamp-model
 source .venv/bin/activate
 ```
 
-## Quick checks
+Runtime-only install (no pytest/ruff):
+
+```bash
+./scripts/install_python.sh --no-dev
+```
+
+Editable install without the helper script:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+## Quick start
 
 ```bash
 pytest
 ./scripts/check_independence.sh
+./scripts/run_all_simulations.sh --skip-missing
+```
+
+Open `outputs/<engine>/REPORT.md` for Markdown reports with embedded SVG figures.
+
+### Run a single bench
+
+Default engine is Python; results go to `outputs/python/` unless `--output-dir` is set.
+
+```bash
 python scripts/run_ac.py --output-dir outputs/python
 python scripts/run_stb.py --output-dir outputs/python
 python scripts/run_noise.py --output-dir outputs/python
 python scripts/run_psrr.py --output-dir outputs/python
 python scripts/run_slew.py --output-dir outputs/python
 python scripts/run_thd.py --output-dir outputs/python
-# Per-engine artifacts under outputs/<engine>/:
-#   *_REPORT.md, REPORT.md — Markdown with embedded SVG figures
-#   opamp_metrics.json — scalar metrics across benches
+```
+
+Example with ngspice (requires `ngspice` on `PATH`):
+
+```bash
+python scripts/run_ac.py --simulator ngspice --output-dir outputs/ngspice
+```
+
+Common macromodel overrides (defaults match [reference/golden_metrics.yaml](reference/golden_metrics.yaml)):
+
+```bash
+python scripts/run_ac.py --a0-db 80 --gbw-hz 10e6 --cmrr-db 90 --ideal
+```
+
+### Run all benches
+
+```bash
 ./scripts/run_all_simulations.sh --skip-missing
 ```
+
+Options: `--output-root DIR`, `--skip-missing` (skip ngspice/Spectre when binaries are absent), `--ideal` (linear small-signal only). Transient benches (slew, THD) run on the Python engine only.
+
+## Python API
+
+```python
+from opamp_model import OpampConfig, OpampNoiseConfig, simulate_ac, simulate_stb
+
+cfg = OpampConfig(a0_db=80.0, gbw_hz=10e6)
+noise = OpampNoiseConfig()
+ac = simulate_ac(cfg, noise)
+stb = simulate_stb(cfg, noise)
+```
+
+Exported symbols are listed in [`src/opamp_model/__init__.py`](src/opamp_model/__init__.py). Configuration dataclasses live in [`src/opamp_model/config.py`](src/opamp_model/config.py).
+
+## Scripts and CLI
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/install_python.sh` | Create `.venv` and editable install |
+| `scripts/run_ac.py` | Open-loop Bode, CMRR curve, impedance plots |
+| `scripts/run_stb.py` | Loop gain, GBW, phase margin |
+| `scripts/run_noise.py` | Spot and integrated noise |
+| `scripts/run_psrr.py` | PSRR vs frequency |
+| `scripts/run_slew.py` | Step response and slew rate |
+| `scripts/run_thd.py` | THD / harmonics (Python engine) |
+| `scripts/run_all_simulations.sh` | Batch all benches per engine |
+| `scripts/write_engine_report.py` | Aggregate `REPORT.md` for an engine |
+| `scripts/check_independence.sh` | Guard against legacy repo imports |
+
+Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ideal`, and op-amp parameters (`--a0-db`, `--gbw-hz`, `--cmrr-db`, `--psrr-db`, …). See `add_opamp_args` in [`src/opamp_model/cli_helpers.py`](src/opamp_model/cli_helpers.py).
+
+## Multi-engine workflow
+
+```text
+  MODEL.md (equations)
+        │
+        ├── Python (src/opamp_model/)
+        ├── ngspice (testbench/ngspice/*.cir)
+        └── Spectre (veriloga/*.va + testbench/spectre/*.scs)
+        │
+        ▼
+  scripts/run_*.py  →  outputs/<engine>/
+```
+
+`reference/golden_metrics.yaml` holds optional transistor-level reference targets for future `compare_engines.py`; it is **not** an engine truth file.
+
+## Metrics and outputs
+
+Each engine directory under `outputs/` typically contains:
+
+| File | Content |
+| --- | --- |
+| `opamp_metrics.json` | Scalar metrics (GBW, phase margin, CMRR, PSRR, noise, slew, …) |
+| `*_REPORT.md` | Per-bench narrative and figures |
+| `REPORT.md` | Engine summary (from `write_engine_report.py`) |
+| `*.csv`, `*.svg` | Sweeps and plots |
+| `logs/` | Simulation logs and netlist copies |
+
+Default frequency sweep: 1 Hz–100 MHz, 10 points per decade ([reference/bench_spec.md](reference/bench_spec.md)).
 
 ## Project layout
 
 ```text
 opamp-model/
-├── reference/          # bench_spec.md, golden_metrics.yaml
-├── veriloga/           # configurable_opamp.va, tia, gm (shells in Phase 0)
-├── src/opamp_model/    # Python package
-├── testbench/          # Spectre / ngspice netlists (Phase 1+)
-├── scripts/
-└── tests/
+├── LICENSE
+├── MODEL.md                 # Equations and multi-engine rules
+├── pyproject.toml
+├── reference/
+│   ├── bench_spec.md        # Bench and metric definitions
+│   └── golden_metrics.yaml  # Optional reference targets
+├── veriloga/
+│   ├── configurable_opamp.va
+│   ├── configurable_tia.va
+│   └── configurable_gm.va
+├── src/opamp_model/         # Python package
+├── testbench/
+│   ├── ngspice/             # SPICE netlists
+│   └── spectre/             # Spectre decks
+├── scripts/                 # Install, benches, batch runner
+├── tests/                   # pytest suite
+└── outputs/                 # Generated reports (gitignored in normal use)
 ```
 
 ## Documentation
 
 | Document | Purpose |
 | --- | --- |
-| [MODEL.md](MODEL.md) | Equations and signal flow (stub until Phase 1) |
-| [reference/bench_spec.md](reference/bench_spec.md) | Bench and metric definitions |
+| [MODEL.md](MODEL.md) | Small-signal equations, CMRR/PSRR, engine parity rules |
+| [reference/bench_spec.md](reference/bench_spec.md) | Bench definitions, probes, default sweeps |
 | [../PLAN.md](../PLAN.md) | Full project plan and phased delivery |
+| [testbench/ngspice/README.md](testbench/ngspice/README.md) | ngspice netlist notes |
+| [testbench/spectre/README.md](testbench/spectre/README.md) | Spectre deck notes |
+
+## Development
+
+```bash
+source .venv/bin/activate
+pytest
+ruff check src tests scripts
+ruff format src tests scripts
+```
+
+Tests live under `tests/` (AC, STB, noise, CM/PS, transient, engines, independence, reporting).
 
 ## Independence
 
-This package is self-contained: CI scans the tree for forbidden legacy imports and paths (see `tests/test_independence.py` and `scripts/check_independence.sh`).
+This package is self-contained: it must not import or reference legacy `adc-model/` or `OPAMP_RAK/` paths. CI-style checks:
+
+```bash
+./scripts/check_independence.sh
+```
+
+Implementation: [`tests/test_independence.py`](tests/test_independence.py), [`src/opamp_model/independence.py`](src/opamp_model/independence.py).
 
 ## License
 
-CC BY 4.0 — see [LICENSE](LICENSE).
+This work is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See [LICENSE](LICENSE) for the deed notice.
+
+Copyright (c) 2026 SJTU-YONGFU-RESEARCH-GRP.
