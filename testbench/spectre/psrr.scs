@@ -1,0 +1,17 @@
+// PSRR testbench stub (Cadence Spectre).
+// Phase 4 Python golden: scripts/run_psrr.py
+//
+// Run via:
+//   python scripts/run_psrr.py --output-dir outputs/spectre
+
+simulator lang=spectre
+
+include "./testbench/spectre/opamp_include.scs"
+
+parameters psrr_db=80
+parameters psrr_pole_hz=100
+parameters f_start=1
+parameters f_stop=100Meg
+parameters dec=10
+
+// TODO: supply AC stimulus and PSRR probe when Verilog-A includes PSRR path.

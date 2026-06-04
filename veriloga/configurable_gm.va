@@ -1,0 +1,23 @@
+// Transconductance (Gm / OTA) macromodel (Phase 0 shell).
+// Phase 5: Iout = GM_S * (V(inp) - V(inn)) with Rout || Cout.
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+module configurable_gm(inp, inn, iout, vdd, vss);
+
+    input inp, inn, vdd, vss;
+    electrical inp, inn, vdd, vss;
+    output iout;
+    electrical iout;
+
+    parameter real GM_S = 1.0e-3;
+    parameter real ROUT_OHM = 1.0e6;
+    parameter real COUT_F = 500.0e-15;
+    parameter integer NOISE_SEED = 1;
+
+    analog begin
+        I(iout) <+ 0.0;
+    end
+
+endmodule

@@ -1,0 +1,14 @@
+// Op-amp noise analysis stub (Phase 3).
+// Validates Spectre; noise spectrum/metrics come from the Python golden.
+
+simulator lang=spectre
+
+parameters rout_ohm=100
+
+VDD (vdd 0) vsource dc=1.8
+VSS (vss 0) vsource dc=0.0
+ROUT (out 0) resistor r=rout_ohm
+VOUT (out 0) vsource dc=0 type=dc
+
+save out
+dc dc

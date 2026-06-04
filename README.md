@@ -177,7 +177,6 @@ Default frequency sweep: 1 Hz–100 MHz, 10 points per decade ([docs/bench_spec.
 ```text
 opamp-model/
 ├── LICENSE
-├── MODEL.md                 # Pointer to docs/MODEL.md
 ├── pyproject.toml
 ├── docs/
 │   ├── MODEL.md             # Equations and multi-engine rules
@@ -205,7 +204,6 @@ opamp-model/
 | [docs/MODEL.md](docs/MODEL.md) | Small-signal equations, CMRR/PSRR, engine parity rules |
 | [docs/bench_spec.md](docs/bench_spec.md) | Bench definitions, probes, default sweeps |
 | [docs/metrics_catalog.md](docs/metrics_catalog.md) | Metric names and status |
-| [../PLAN.md](../PLAN.md) | Full project plan and phased delivery |
 | [testbench/ngspice/README.md](testbench/ngspice/README.md) | ngspice netlist notes |
 | [testbench/spectre/README.md](testbench/spectre/README.md) | Spectre deck notes |
 

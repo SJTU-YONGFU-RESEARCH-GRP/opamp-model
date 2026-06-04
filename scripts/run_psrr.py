@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""PSRR vs frequency testbench."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from opamp_model.cli_helpers import (
+    add_noise_args,
+    add_opamp_args,
+    add_output_args,
+    add_simulator_args,
+    build_noise_config,
+    build_opamp_config,
+    resolve_engine_label,
+)
+from opamp_model.cm_ps import plot_psrr, simulate_psrr
+from opamp_model.io import package_root, write_psrr_csv
+from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
+from opamp_model.report import (
+    preserve_metrics_sections,
+    read_metrics_json,
+    write_engine_report,
+    write_psrr_report,
+)
+from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
+
+
+def main() -> None:
+    """Run PSRR simulation and write CSV/SVG plus metrics JSON."""
+    parser = argparse.ArgumentParser(description="Op-amp PSRR testbench.")
+    add_opamp_args(parser)
+    add_noise_args(parser)
+    add_simulator_args(parser)
+    add_output_args(parser)
+    args = parser.parse_args()
+
+    cfg = build_opamp_config(args)
+    noise = build_noise_config(args)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    log = SimulationLog(out_dir / "logs" / "python_psrr.log")
+    log.write_header("psrr", resolve_engine_label(args.simulator), cfg, noise)
+    log_run_context(log)
+
+    if args.simulator != "python":
+        log.write("PSRR bench uses Python golden model in Phase 4.")
+    result = simulate_psrr(cfg)
+
+    csv_path = out_dir / "psrr.csv"
+    write_psrr_csv(csv_path, result["frequency_hz"], result["psrr_db"])
+    psrr_svg = out_dir / "psrr.svg"
+    plot_psrr(result, psrr_svg)
+
+    report = build_metrics_report(
+        cfg,
+        noise,
+        engine=args.simulator,
+        psrr_result=result,
+    )
+    report = preserve_metrics_sections(report, read_metrics_json(out_dir / "opamp_metrics.json"))
+    write_metrics_json(out_dir / "opamp_metrics.json", report)
+    psrr_md = write_psrr_report(
+        out_dir,
+        engine=args.simulator,
+        cfg=cfg,
+        report=report,
+        psrr_svg=psrr_svg,
+    )
+    engine_md = write_engine_report(out_dir, engine=args.simulator)
+    archive_veriloga_artifacts(package_root(), out_dir)
+    log.write(f"wrote {csv_path}")
+    log.write(f"wrote {psrr_svg}")
+    log.write(f"wrote {psrr_md}")
+    log.write(f"wrote {out_dir / 'opamp_metrics.json'}")
+    if engine_md is not None:
+        log.write(f"wrote {engine_md}")
+    log.close()
+    print(f"Wrote {csv_path}")
+    print(f"Wrote {psrr_svg}")
+    print(f"Wrote {psrr_md}")
+    print(f"Wrote {out_dir / 'opamp_metrics.json'}")
+    print(format_metrics_table(report))
+
+
+if __name__ == "__main__":
+    main()

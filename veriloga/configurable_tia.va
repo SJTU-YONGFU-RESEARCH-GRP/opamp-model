@@ -1,0 +1,23 @@
+// Transimpedance amplifier — op-amp + feedback (Phase 0 shell).
+// Phase 5: instantiate configurable_opamp and Rf || Cf network.
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+module configurable_tia(iin, inp, inn, out, vdd, vss);
+
+    input iin, inp, inn, vdd, vss;
+    electrical iin, inp, inn, vdd, vss;
+    output out;
+    electrical out;
+
+    parameter real RF_OHM = 100.0e3;
+    parameter real CF_F = 100.0e-15;
+    parameter real A0_DB = 80.0;
+    parameter real GBW_HZ = 10.0e6;
+
+    analog begin
+        V(out) <+ 0.0;
+    end
+
+endmodule

@@ -1,0 +1,63 @@
+// Configurable voltage op-amp — dominant-pole differential macromodel (Phase 1).
+//
+// Open-loop: H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ/A0_LINEAR
+// Phase 1: ideal small-signal only (no CMRR/PSRR/noise/slew).
+
+`include "constants.vams"
+`include "disciplines.vams"
+
+(* compact_module *)
+(* instance_parameter_list = {A0_DB, GBW_HZ, RIN_OHM, CIN_F, ROUT_OHM, COUT_F} *)
+module configurable_opamp(inp, inn, out, vdd, vss);
+
+    input inp, inn, vdd, vss;
+    electrical inp, inn, vdd, vss;
+    output out;
+    electrical out;
+
+    parameter real A0_DB = 80.0;
+    parameter real GBW_HZ = 10.0e6;
+    parameter real FP2_HZ = 0.0;
+    parameter real FZ_HZ = 0.0;
+    parameter real RIN_OHM = 1.0e12;
+    parameter real CIN_F = 1.0e-12;
+    parameter real ROUT_OHM = 100.0;
+    parameter real COUT_F = 2.0e-12;
+
+    real a0_linear;
+    real wp;
+    real vd;
+    // Spectre laplace_nd requires array variables (not inline parameter expressions).
+    real numer[0:1];
+    real denom[0:1];
+
+    analog begin
+        @(initial_step) begin
+            a0_linear = pow(10.0, A0_DB / 20.0);
+            if (a0_linear < 1.0)
+                a0_linear = 1.0;
+            wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
+            // H(s) = (a0*wp) / (s + wp)  <=>  numer {a0*wp, 0}, denom {wp, 1}
+            numer[0] = a0_linear * wp;
+            numer[1] = 0.0;
+            denom[0] = wp;
+            denom[1] = 1.0;
+        end
+
+        vd = V(inp) - V(inn);
+        V(out) <+ laplace_nd(vd, numer, denom);
+
+        // High-Z differential input conductance (optional loading).
+        if (RIN_OHM > 0.0)
+            I(inp, inn) <+ V(inp, inn) / RIN_OHM;
+        if (CIN_F > 0.0)
+            I(inp, inn) <+ CIN_F * ddt(V(inp, inn));
+
+        // Output shunt (Rout || Cout).
+        if (ROUT_OHM > 0.0)
+            I(out) <+ V(out) / ROUT_OHM;
+        if (COUT_F > 0.0)
+            I(out) <+ COUT_F * ddt(V(out));
+    end
+
+endmodule

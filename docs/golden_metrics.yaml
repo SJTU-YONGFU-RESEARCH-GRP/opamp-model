@@ -1,0 +1,18 @@
+# Optional reference targets (populate from transistor-level sim or lab data).
+# NOT an engine truth file — compare_engines.py uses this as a third column only.
+# Peer engines (python / ngspice / spectre) are compared to each other per docs/MODEL.md.
+#
+# Units:
+#   *_db — decibels
+#   *_hz — hertz
+#   slew_v_per_us — volts per microsecond
+#   en_white_nv_per_sqrt_hz — nanovolts per sqrt(hertz), input-referred
+
+a0_db: 80.0
+gbw_hz: 10.0e6
+phase_margin_deg: 60.0
+cmrr_db: 90.0
+psrr_db: 80.0
+slew_v_per_us: 10.0
+en_white_nv_per_sqrt_hz: 5.0
+en_flicker_corner_hz: 100.0

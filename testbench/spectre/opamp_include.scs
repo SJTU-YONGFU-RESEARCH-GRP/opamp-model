@@ -1,0 +1,2 @@
+// Verilog-A include for configurable_opamp (rendered to absolute path by Python driver).
+ahdl_include "./veriloga/configurable_opamp.va"
