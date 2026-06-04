@@ -1,12 +1,23 @@
-* Open-loop AC Bode — ngspice RC-pole + VCVS macromodel.
-* Run via: python scripts/run_ac.py --ngspice --output-dir outputs/ngspice
+* Open-loop AC Bode — ngspice one-pole macromodel (laplace_nd equivalent).
+*
+* Target (same as core.py / configurable_opamp.va):
+*   H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ / A0_LINEAR
+* Spectre laplace_nd form:
+*   numer = {A0*wp, 0},  denom = {wp, 1}  =>  V = (A0*wp*vd) / (s + wp)
+*
+* ngspice realization (ideal VCVS + dominant-pole RC):
+*   V(n1) = A0 * (V(inp) - V(inn))
+*   V(n2) = V(n1) / (1 + s*Rlp*Clp),  Rlp*Clp = 1/wp
+*   V(out) = V(n2)
+* Only the one-pole term is modeled (fp2_hz / fz_hz are Python/Spectre-VA extensions).
 
 .param a0_db=80
 .param gbw_hz=10Meg
 .param rin_ohm=1e12
 .param rout_ohm=100
 .param a0_linear=PLACEHOLDER_A0
-.param rlp_ohm=1000
+.param wp_rad_s=PLACEHOLDER_WP
+.param rlp_ohm=PLACEHOLDER_RLP
 .param clp_f=PLACEHOLDER_CLP
 
 VDD vdd 0 DC 1.8
@@ -16,10 +27,9 @@ Rinn inn 0 {rin_ohm}
 Rinp inp 0 {rin_ohm}
 VAC inp 0 DC 0.9 AC 1
 
-Eaux n1 0 inp inn PLACEHOLDER_A0
+Eaux n1 0 inp inn {a0_linear}
 Rlp n1 n2 {rlp_ohm}
 Clp n2 0 {clp_f}
-Rbias n2 0 1e9
 Eout out 0 n2 0 1
 ROUT out 0 {rout_ohm}
 

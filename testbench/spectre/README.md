@@ -1,6 +1,7 @@
 # Spectre testbenches
 
-Netlists (`.scs`) cover AC, STB, noise, PSRR, and stubs for transient, TIA, and Gm benches.
+Netlists (`.scs`) cover AC, STB, noise, PSRR, and stubs for transient (``slew_stub.scs``,
+``thd_stub.scs`` use ``dc`` only; waveforms from Python), TIA, and Gm benches.
 
 Requirements:
 

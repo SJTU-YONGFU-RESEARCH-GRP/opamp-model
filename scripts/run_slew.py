@@ -24,7 +24,9 @@ from opamp_model.report import (
     write_engine_report,
     write_slew_report,
 )
+from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, log_run_context
+from opamp_model.spectre_engine import SpectreNotFoundError, run_spectre_tran_stub
 from opamp_model.tran import measure_slew_rates, plot_slew_step
 
 
@@ -105,9 +107,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.simulator != "python":
-        raise SystemExit("run_slew.py supports --simulator python only.")
-
     cfg = _cfg_for_slew(args, ideal=args.ideal)
     noise = build_noise_config(args)
     out_dir = Path(args.output_dir)
@@ -116,6 +115,26 @@ def main() -> None:
     log = SimulationLog(out_dir / "logs" / "slew.log")
     log.write_header("slew", resolve_engine_label(args.simulator), cfg, noise)
     log_run_context(log)
+
+    try:
+        if args.simulator == "ngspice":
+            run_ngspice_tran_stub(
+                cfg,
+                out_dir,
+                template_name="slew_stub.cir",
+                log_name="ngspice_slew_stub.log",
+            )
+        elif args.simulator == "spectre":
+            run_spectre_tran_stub(
+                cfg,
+                out_dir,
+                template_name="slew_stub.scs",
+                log_name="spectre_slew_stub.log",
+            )
+    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+        log.write(str(exc))
+        log.close()
+        raise SystemExit(str(exc)) from exc
 
     metrics, pos, neg = measure_slew_rates(
         cfg,

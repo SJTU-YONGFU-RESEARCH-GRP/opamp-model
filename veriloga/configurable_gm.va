@@ -1,9 +1,11 @@
-// Transconductance (Gm / OTA) macromodel (shell).
-// TODO: Iout = GM_S * (V(inp) - V(inn)) with Rout || Cout.
+// Transconductance (Gm / OTA) macromodel.
+// Iout = GM_S * (V(inp) - V(inn)) with output shunt Rout || Cout.
 
 `include "constants.vams"
 `include "disciplines.vams"
 
+(* compact_module *)
+(* instance_parameter_list = {GM_S, ROUT_OHM, COUT_F} *)
 module configurable_gm(inp, inn, iout, vdd, vss);
 
     input inp, inn, vdd, vss;
@@ -16,8 +18,16 @@ module configurable_gm(inp, inn, iout, vdd, vss);
     parameter real COUT_F = 500.0e-15;
     parameter integer NOISE_SEED = 1;
 
+    real vd;
+
     analog begin
-        I(iout) <+ 0.0;
+        vd = V(inp) - V(inn);
+        I(iout) <+ GM_S * vd;
+
+        if (ROUT_OHM > 0.0)
+            I(iout) <+ V(iout) / ROUT_OHM;
+        if (COUT_F > 0.0)
+            I(iout) <+ COUT_F * ddt(V(iout));
     end
 
 endmodule

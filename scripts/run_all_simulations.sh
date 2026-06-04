@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Batch: AC, STB, noise, PSRR, slew, THD for python / ngspice / spectre (when available).
+# Batch: AC, STB, noise, PSRR, AC comp, slew, THD for python / ngspice / spectre (when available).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,6 +12,17 @@ BENCH_SCRIPTS=(
     run_stb.py
     run_noise.py
     run_psrr.py
+    run_ac_comp.py
+)
+
+TRAN_SCRIPTS=(
+    run_slew.py
+    run_thd.py
+)
+
+OPTIONAL_BENCH_SCRIPTS=(
+    run_tia_ac.py
+    run_gm_ac.py
 )
 
 usage() {
@@ -21,7 +32,8 @@ Usage: $(basename "$0") [OPTIONS] [-- EXTRA_ARGS...]
 Run all op-amp benches for each available engine under:
   \${OUTPUT_ROOT}/{python,ngspice,spectre}/
 
-Transient benches (slew, THD) run for the python engine only.
+TRAN benches (slew, THD) run for all engines; ngspice/spectre use minimal
+TRAN stubs and Python macromodel curves until full SPICE TRAN netlists exist.
 
 Options:
   --output-root DIR   Base output directory (default: ${ROOT_DIR}/outputs).
@@ -83,22 +95,22 @@ for engine in python ngspice spectre; do
     for script in "${BENCH_SCRIPTS[@]}"; do
         run_bench "${engine}" "${script}"
     done
+    for script in "${OPTIONAL_BENCH_SCRIPTS[@]}"; do
+        if [[ -f "${ROOT_DIR}/scripts/${script}" ]]; then
+            run_bench "${engine}" "${script}"
+        fi
+    done
+    for script in "${TRAN_SCRIPTS[@]}"; do
+        run_bench "${engine}" "${script}"
+    done
     write_report "${engine}"
 done
 
-echo "=== python: run_slew.py ==="
-"${PYTHON}" "${ROOT_DIR}/scripts/run_slew.py" \
-    --simulator python \
-    --output-dir "${OUTPUT_ROOT}/python" \
-    "${EXTRA_ARGS[@]}"
-
-echo "=== python: run_thd.py ==="
-"${PYTHON}" "${ROOT_DIR}/scripts/run_thd.py" \
-    --simulator python \
-    --output-dir "${OUTPUT_ROOT}/python" \
-    "${EXTRA_ARGS[@]}"
-
-write_report python
+if [[ -f "${ROOT_DIR}/scripts/compare_engines.py" ]]; then
+    echo "=== compare_engines.py ==="
+    "${PYTHON}" "${ROOT_DIR}/scripts/compare_engines.py" \
+        --output-root "${OUTPUT_ROOT}" || true
+fi
 
 echo "Batch complete under ${OUTPUT_ROOT}/"
 echo "Open outputs/<engine>/REPORT.md for figures and bench report links."

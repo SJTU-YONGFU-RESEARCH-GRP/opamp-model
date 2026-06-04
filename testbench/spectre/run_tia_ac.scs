@@ -1,0 +1,34 @@
+// TIA closed-loop AC stub (current input).
+// Validates Spectre + configurable_tia; Zt curves from Python macromodel today.
+
+simulator lang=spectre
+
+ahdl_include "./veriloga/configurable_tia.va"
+
+parameters rf_ohm=100k
+parameters cf_f=100f
+parameters cs_f=0
+parameters a0_db=80
+parameters gbw_hz=10Meg
+parameters rin_ohm=1T
+parameters cin_f=1p
+parameters rout_ohm=100
+parameters cout_f=2p
+parameters f_start=1
+parameters f_stop=100Meg
+parameters dec=10
+
+VDD (vdd 0) vsource dc=1.8
+VSS (vss 0) vsource dc=0.0
+VCM (inp 0) vsource dc=0.9 type=dc
+
+IIN (iin 0) isource dc=0 type=sine ampl=1u freq=0 \
+    acmag=1 acphase=0
+
+XTIA (iin inp inn out vdd vss) configurable_tia \
+    RF_OHM=rf_ohm CF_F=cf_f CS_F=cs_f \
+    A0_DB=a0_db GBW_HZ=gbw_hz RIN_OHM=rin_ohm CIN_F=cin_f \
+    ROUT_OHM=rout_ohm COUT_F=cout_f
+
+save out
+ac ac start=f_start stop=f_stop dec=dec annotate=status

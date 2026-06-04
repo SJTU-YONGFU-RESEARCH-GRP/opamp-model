@@ -1,0 +1,24 @@
+* Gm / OTA AC — VCCS + Rout || Cout (minimal testbench).
+* Run via: python scripts/run_gm_ac.py --output-dir outputs/python
+
+.param gm_s=1m
+.param rout_ohm=1Meg
+.param cout_f=500f
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+VCM inn 0 DC 0.9
+VAC inp 0 DC 0.9 AC 1
+
+G1 iout 0 inp inn {gm_s}
+Rout iout 0 {rout_ohm}
+Cout iout 0 {cout_f}
+
+.ac dec 10 1 100Meg
+.control
+run
+set wr_singlescale
+wrdata gm_ac.raw frequency vdb(iout) vp(iout)
+.endc
+
+.end

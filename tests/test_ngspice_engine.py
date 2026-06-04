@@ -28,18 +28,24 @@ def test_find_ngspice() -> None:
 
 
 def test_ngspice_ac_matches_python(tmp_path: Path) -> None:
-    """ngspice AC Bode aligns with Python golden within tolerance."""
-    cfg = OpampConfig(a0_db=60.0, gbw_hz=1.0e6, rout_ohm=1.0e12)
+    """ngspice AC Bode aligns with Python one-pole model (PLAN tolerances)."""
+    cfg = OpampConfig(
+        a0_db=60.0,
+        gbw_hz=1.0e6,
+        rout_ohm=1.0e12,
+        fp2_hz=0.0,
+        fz_hz=0.0,
+    )
     py = simulate_ac(cfg)
     try:
         ng = simulate_ac_ngspice(cfg, tmp_path)
     except NgspiceNotFoundError:
         pytest.skip("ngspice not available")
-    assert ng["metrics"]["gbw_hz"] == pytest.approx(py["metrics"]["gbw_hz"], rel=0.1)
-    assert ng["metrics"]["a0_db"] == pytest.approx(py["metrics"]["a0_db"], rel=1.0)
+    assert ng["metrics"]["gbw_hz"] == pytest.approx(py["metrics"]["gbw_hz"], rel=0.05)
+    assert ng["metrics"]["a0_db"] == pytest.approx(py["metrics"]["a0_db"], abs=0.1)
     assert ng["metrics"]["phase_margin_deg"] == pytest.approx(
         py["metrics"]["phase_margin_deg"],
-        abs=5.0,
+        abs=2.0,
     )
 
 

@@ -1,10 +1,13 @@
-* Loop-gain AC — same open-loop macromodel as AC (beta scaled in Python).
+* Loop-gain AC — same one-pole open-loop macromodel as ac_open_loop.cir.
+* run_stb.py applies loop_beta to gain (dB) after simulation (same as Spectre STB flow).
+
 .param a0_db=80
 .param gbw_hz=10Meg
 .param rin_ohm=1e12
 .param rout_ohm=100
 .param a0_linear=PLACEHOLDER_A0
-.param rlp_ohm=1000
+.param wp_rad_s=PLACEHOLDER_WP
+.param rlp_ohm=PLACEHOLDER_RLP
 .param clp_f=PLACEHOLDER_CLP
 
 VDD vdd 0 DC 1.8
@@ -14,10 +17,9 @@ Rinn inn 0 {rin_ohm}
 Rinp inp 0 {rin_ohm}
 VAC inp 0 DC 0.9 AC 1
 
-Eaux n1 0 inp inn PLACEHOLDER_A0
+Eaux n1 0 inp inn {a0_linear}
 Rlp n1 n2 {rlp_ohm}
 Clp n2 0 {clp_f}
-Rbias n2 0 1e9
 Eout out 0 n2 0 1
 ROUT out 0 {rout_ohm}
 

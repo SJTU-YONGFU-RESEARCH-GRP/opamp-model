@@ -5,11 +5,21 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+from numpy.typing import NDArray
+
+from opamp_model.ac import extract_gbw_phase_margin
 from opamp_model.config import OpampConfig, OpampNoiseConfig
-from opamp_model.io import package_root
-from opamp_model.model import AcSimulationResult, NoiseSimulationResult, simulate_ac, simulate_noise
+from opamp_model.io import package_root, write_bode_csv
+from opamp_model.model import AcSimulationResult, NoiseSimulationResult, simulate_noise
+from opamp_model.spectre_psf import (
+    SpectrePsfError,
+    locate_ac_psf,
+    read_spectre_ac_from_netlists,
+)
 
 
 class SpectreNotFoundError(RuntimeError):
@@ -25,11 +35,17 @@ _SCS_INCLUDE = re.compile(
 def find_spectre_executable() -> str:
     """Return the Spectre binary path or raise ``SpectreNotFoundError``."""
     found = shutil.which("spectre")
-    if not found:
-        raise SpectreNotFoundError(
-            "Cadence Spectre not found on PATH. Install Spectre or use --simulator python."
-        )
-    return found
+    if found:
+        return found
+    for candidate in (
+        "/eda/cadence/SPECTRE241/tools/bin/spectre",
+        "/eda/cadence/SPECTRE231/tools/bin/spectre",
+    ):
+        if Path(candidate).is_file():
+            return candidate
+    raise SpectreNotFoundError(
+        "Cadence Spectre not found on PATH. Install Spectre or use --simulator python."
+    )
 
 
 def _format_param(value: float | int) -> str:
@@ -96,13 +112,23 @@ def run_spectre_netlist(
     )
 
 
+@dataclass(frozen=True)
+class SpectreAcResult:
+    """Artifacts from a Spectre AC run."""
+
+    netlist_path: Path
+    log_path: Path
+    raw_dir: Path
+    csv_path: Path
+
+
 def run_spectre_ac(
     cfg: OpampConfig,
     output_dir: Path,
     *,
     template_name: str = "ac_open_loop.scs",
-) -> Path:
-    """Render and execute a Spectre AC netlist; return log path."""
+) -> SpectreAcResult:
+    """Render and execute a Spectre AC netlist; export Bode CSV from PSF."""
     repo = package_root()
     template = repo / "testbench" / "spectre" / template_name
     logs_dir = output_dir / "logs" / "netlists"
@@ -112,13 +138,49 @@ def run_spectre_ac(
         render_spectre_ac_netlist(template, cfg, repo_root=repo),
         encoding="utf-8",
     )
-    log_path = output_dir / "logs" / f"spectre_{template_name.replace('.scs', '')}.log"
+    stem = template_name.replace(".scs", "")
+    log_path = output_dir / "logs" / f"spectre_{stem}.log"
+    csv_path = output_dir / ("stb_bode.csv" if stem == "stb_loop" else "ac_bode.csv")
     completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
     log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
     if completed.returncode != 0:
         msg = f"Spectre failed with code {completed.returncode}; see {log_path}"
         raise RuntimeError(msg)
-    return log_path
+
+    try:
+        bode = read_spectre_ac_from_netlists(logs_dir, stem=stem, signal="out")
+    except SpectrePsfError as exc:
+        msg = f"Spectre AC PSF read failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    write_bode_csv(
+        csv_path,
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
+    raw_dir = locate_ac_psf(logs_dir, stem=stem).raw_dir
+    return SpectreAcResult(
+        netlist_path=netlist_path,
+        log_path=log_path,
+        raw_dir=raw_dir,
+        csv_path=csv_path,
+    )
+
+
+def spectre_ac_to_simulation_result(
+    frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+    phase_deg: NDArray[np.float64],
+) -> AcSimulationResult:
+    """Build ``AcSimulationResult`` from Spectre AC PSF columns."""
+    metrics = extract_gbw_phase_margin(frequency_hz, gain_db, phase_deg)
+    return AcSimulationResult(
+        frequency_hz=frequency_hz,
+        gain_db=gain_db,
+        phase_deg=phase_deg,
+        metrics=metrics,
+    )
 
 
 def simulate_ac_spectre(
@@ -126,14 +188,19 @@ def simulate_ac_spectre(
     output_dir: Path,
     noise: OpampNoiseConfig | None = None,
 ) -> AcSimulationResult:
-    """Run Spectre AC; metrics must come from Spectre results (PSF parser).
-
-    Temporary: when no PSF parser is available, Python curves are substituted
-    after the netlist run. This is scaffolding only — not peer-engine behavior.
-    """
+    """Run open-loop AC in Spectre and return Bode data parsed from PSF."""
     _ = noise
-    run_spectre_ac(cfg, output_dir)
-    return simulate_ac(cfg, noise)
+    artifacts = run_spectre_ac(cfg, output_dir)
+    bode = read_spectre_ac_from_netlists(
+        artifacts.netlist_path.parent,
+        stem=artifacts.netlist_path.stem,
+        signal="out",
+    )
+    return spectre_ac_to_simulation_result(
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
 
 
 def run_spectre_noise_stub(cfg: OpampConfig, output_dir: Path) -> Path:
@@ -162,3 +229,27 @@ def simulate_noise_spectre(
     """Run Spectre noise bench; spectrum must come from Spectre (stub today)."""
     run_spectre_noise_stub(cfg, output_dir)
     return simulate_noise(cfg, noise)
+
+
+def run_spectre_tran_stub(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    template_name: str,
+    log_name: str,
+) -> Path:
+    """Run a minimal Spectre TRAN stub (``dc`` only) to validate the toolchain."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+    log_path = output_dir / "logs" / log_name
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    if completed.returncode != 0:
+        msg = f"Spectre TRAN stub failed with code {completed.returncode}; see {log_path}"
+        raise RuntimeError(msg)
+    _ = cfg
+    return log_path

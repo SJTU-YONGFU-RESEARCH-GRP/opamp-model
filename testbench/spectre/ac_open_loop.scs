@@ -9,6 +9,9 @@ include "./testbench/spectre/opamp_include.scs"
 
 parameters a0_db=80
 parameters gbw_hz=10Meg
+parameters cmrr_db=90
+parameters psrr_db=80
+parameters psrr_pole_hz=100
 parameters rin_ohm=1T
 parameters cin_f=1p
 parameters rout_ohm=100
@@ -21,11 +24,11 @@ VDD (vdd 0) vsource dc=1.8
 VSS (vss 0) vsource dc=0.0
 VCM (inn 0) vsource dc=0.9 type=dc
 
-VAC (inp 0) vsource dc=0.9 type=sine ampl=1m freq=0 \
-    acmag=1 acphase=0
+VAC (inp 0) vsource dc=0.9 type=dc mag=1
 
 XOP (inp inn out vdd vss) configurable_opamp \
-    A0_DB=a0_db GBW_HZ=gbw_hz RIN_OHM=rin_ohm CIN_F=cin_f ROUT_OHM=rout_ohm COUT_F=cout_f
+    A0_DB=a0_db GBW_HZ=gbw_hz CMRR_DB=cmrr_db PSRR_DB=psrr_db \
+    PSRR_POLE_HZ=psrr_pole_hz RIN_OHM=rin_ohm CIN_F=cin_f ROUT_OHM=rout_ohm COUT_F=cout_f
 
-save out
+save v
 ac ac start=f_start stop=f_stop dec=dec annotate=status

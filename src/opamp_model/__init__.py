@@ -10,6 +10,7 @@ from opamp_model.config import (
 )
 from opamp_model.cm_ps import simulate_cmrr, simulate_psrr
 from opamp_model.model import simulate_ac, simulate_noise, simulate_stb
+from opamp_model.tia import simulate_tia_ac
 
 __all__ = [
     "AcMetrics",
@@ -25,6 +26,7 @@ __all__ = [
     "simulate_noise",
     "simulate_psrr",
     "simulate_stb",
+    "simulate_tia_ac",
 ]
 
 __version__ = "0.1.0"

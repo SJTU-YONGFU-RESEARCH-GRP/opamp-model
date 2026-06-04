@@ -8,11 +8,12 @@ from typing import Any, TypedDict
 
 import numpy as np
 
-from opamp_model.ac import AcMetrics
+from opamp_model.ac import AcCompMetrics, AcMetrics
 from opamp_model.cm_ps import CmrrSimulationResult, PsrrSimulationResult
 from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.impedance import zin_diff, zout as zout_model
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.tia import TiaMetrics, TiaSimulationResult
 from opamp_model.tran import ThdMetrics, is_thd_ideal
 
 
@@ -36,6 +37,7 @@ class OpampMetricsReport(TypedDict):
     cmrr_psrr: dict[str, MetricEntry]
     noise: dict[str, MetricEntry]
     large_signal: dict[str, MetricEntry]
+    tia: dict[str, MetricEntry]
 
 
 def _metric(
@@ -87,6 +89,27 @@ def build_ac_metric_entries(ac: AcMetrics) -> dict[str, MetricEntry]:
             source="ac_bode",
         ),
     }
+
+
+def merge_ac_comp_entries(
+    ac_entries: dict[str, MetricEntry],
+    comp: AcCompMetrics,
+) -> dict[str, MetricEntry]:
+    """Add gain-peaking scalars from ``run_ac_comp.py`` into the AC metrics group."""
+    merged = dict(ac_entries)
+    merged["peak_db"] = _metric(
+        comp["peak_db"],
+        unit="dB",
+        status="reported",
+        source="run_ac_comp.py",
+    )
+    merged["peak_freq_hz"] = _metric(
+        comp["peak_freq_hz"],
+        unit="Hz",
+        status="reported",
+        source="run_ac_comp.py",
+    )
+    return merged
 
 
 def build_impedance_entries(cfg: OpampConfig, *, freq_hz: float = 1.0) -> dict[str, MetricEntry]:
@@ -193,6 +216,30 @@ def build_noise_entries(
     return entries
 
 
+def build_tia_metric_entries(metrics: TiaMetrics, *, unit: str = "ohm") -> dict[str, MetricEntry]:
+    """Map TIA AC extraction results to report entries."""
+    return {
+        "zt_dc_ohm": _metric(
+            metrics["zt_dc_ohm"],
+            unit=unit,
+            status="reported",
+            source="tia_ac",
+        ),
+        "zt_dc_db": _metric(
+            metrics["zt_dc_db"],
+            unit="dB",
+            status="reported",
+            source="tia_ac",
+        ),
+        "bandwidth_hz": _metric(
+            metrics["bandwidth_hz"],
+            unit="Hz",
+            status="reported",
+            source="tia_ac",
+        ),
+    }
+
+
 def build_large_signal_entries(
     cfg: OpampConfig,
     *,
@@ -270,12 +317,18 @@ def build_metrics_report(
     ideal_flag: bool = False,
     slew_pos_measured: float | None = None,
     slew_neg_measured: float | None = None,
+    tia_result: TiaSimulationResult | None = None,
 ) -> OpampMetricsReport:
     """Assemble a full metrics report from available simulations and parameters."""
     ac_metrics = ac_result["metrics"] if ac_result else None
     stb_metrics = stb_result["metrics"] if stb_result else ac_metrics
     ac_entries = build_ac_metric_entries(ac_metrics) if ac_metrics else {}
     stb_entries = build_ac_metric_entries(stb_metrics) if stb_metrics else {}
+    tia_entries = (
+        build_tia_metric_entries(tia_result["metrics"], unit="ohm")
+        if tia_result is not None
+        else {}
+    )
     return OpampMetricsReport(
         engine=engine,
         config=_config_snapshot(cfg),
@@ -295,6 +348,7 @@ def build_metrics_report(
             slew_pos_measured=slew_pos_measured,
             slew_neg_measured=slew_neg_measured,
         ),
+        tia=tia_entries,
     )
 
 
@@ -326,4 +380,6 @@ def format_metrics_table(report: OpampMetricsReport) -> str:
     section("CMRR / PSRR", report["cmrr_psrr"])
     section("Noise", report["noise"])
     section("Large-signal", report["large_signal"])
+    if report.get("tia"):
+        section("TIA", report["tia"])
     return "\n".join(lines)

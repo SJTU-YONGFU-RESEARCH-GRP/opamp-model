@@ -1,13 +1,15 @@
 // Configurable voltage op-amp — dominant-pole differential macromodel.
 //
 // Open-loop: H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ/A0_LINEAR
-// Ideal small-signal only (no CMRR/PSRR/noise/slew in this module yet).
+// CMRR: ACM(s) = Aol(s) / CMRR_LINEAR  (common-mode path)
+// PSRR: H_ps(s) = (1/PSRR_LINEAR) / (1 + s/wp_psrr)  (VDD feedthrough)
 
 `include "constants.vams"
 `include "disciplines.vams"
 
 (* compact_module *)
-(* instance_parameter_list = {A0_DB, GBW_HZ, RIN_OHM, CIN_F, ROUT_OHM, COUT_F} *)
+(* instance_parameter_list = {A0_DB, GBW_HZ, CMRR_DB, PSRR_DB, PSRR_POLE_HZ,
+    RIN_OHM, CIN_F, ROUT_OHM, COUT_F} *)
 module configurable_opamp(inp, inn, out, vdd, vss);
 
     input inp, inn, vdd, vss;
@@ -19,33 +21,66 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     parameter real GBW_HZ = 10.0e6;
     parameter real FP2_HZ = 0.0;
     parameter real FZ_HZ = 0.0;
+    parameter real CMRR_DB = 90.0;
+    parameter real PSRR_DB = 80.0;
+    parameter real PSRR_POLE_HZ = 100.0;
     parameter real RIN_OHM = 1.0e12;
     parameter real CIN_F = 1.0e-12;
     parameter real ROUT_OHM = 100.0;
     parameter real COUT_F = 2.0e-12;
 
     real a0_linear;
+    real cmrr_linear;
+    real psrr_linear;
     real wp;
+    real wp_psrr;
     real vd;
+    real vcm;
     // Spectre laplace_nd requires array variables (not inline parameter expressions).
     real numer[0:1];
     real denom[0:1];
+    real cm_numer[0:1];
+    real cm_denom[0:1];
+    real ps_numer[0:1];
+    real ps_denom[0:1];
 
     analog begin
         @(initial_step) begin
             a0_linear = pow(10.0, A0_DB / 20.0);
             if (a0_linear < 1.0)
                 a0_linear = 1.0;
+            cmrr_linear = pow(10.0, CMRR_DB / 20.0);
+            if (cmrr_linear < 1.0)
+                cmrr_linear = 1.0;
+            psrr_linear = pow(10.0, PSRR_DB / 20.0);
+            if (psrr_linear < 1.0)
+                psrr_linear = 1.0;
             wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
+            wp_psrr = 2.0 * `M_PI * PSRR_POLE_HZ;
+            if (wp_psrr < 1.0e-30)
+                wp_psrr = 1.0e-30;
             // H(s) = (a0*wp) / (s + wp)  <=>  numer {a0*wp, 0}, denom {wp, 1}
             numer[0] = a0_linear * wp;
             numer[1] = 0.0;
             denom[0] = wp;
             denom[1] = 1.0;
+            // ACM(s) = Aol(s) / CMRR_LINEAR
+            cm_numer[0] = numer[0] / cmrr_linear;
+            cm_numer[1] = 0.0;
+            cm_denom[0] = wp;
+            cm_denom[1] = 1.0;
+            // H_ps(s) = (1/psrr_linear) / (1 + s/wp_psrr)
+            ps_numer[0] = (1.0 / psrr_linear) * wp_psrr;
+            ps_numer[1] = 0.0;
+            ps_denom[0] = wp_psrr;
+            ps_denom[1] = 1.0;
         end
 
         vd = V(inp) - V(inn);
-        V(out) <+ laplace_nd(vd, numer, denom);
+        vcm = 0.5 * (V(inp) + V(inn));
+        V(out) <+ laplace_nd(vd, numer, denom)
+               + laplace_nd(vcm, cm_numer, cm_denom)
+               + laplace_nd(V(vdd), ps_numer, ps_denom);
 
         // High-Z differential input conductance (optional loading).
         if (RIN_OHM > 0.0)

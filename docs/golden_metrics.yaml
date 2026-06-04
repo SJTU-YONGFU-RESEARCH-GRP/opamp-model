@@ -1,6 +1,8 @@
 # Optional reference targets (populate from transistor-level sim or lab data).
-# NOT an engine truth file — compare_engines.py uses this as a third column only.
-# Peer engines (python / ngspice / spectre) are compared to each other per docs/MODEL.md.
+# NOT an engine truth file — scripts/compare_engines.py prints these as a "ref" column only.
+# Pass/fail is peer spread (python / ngspice / spectre) vs docs/MODEL.md limits:
+#   A0 ≤ 0.1 dB, GBW ≤ 5%, phase margin ≤ 2°, integrated noise RMS ≤ 5%.
+# Keys map to opamp_metrics.json fields (slew_v_per_us → slew_pos/neg_vps in V/s).
 #
 # Units:
 #   *_db — decibels

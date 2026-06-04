@@ -132,9 +132,18 @@ Disabled when ``--ideal`` or ``nl_a2`` / ``nl_a3`` are zero.
 | Rout | Output resistance | Ω |
 | Noise | Input-referred voltage noise | V/√Hz |
 
-### AC compensation / distortion (`run_ac_comp.py`) — planned
+### AC compensation / gain peaking (`run_ac_comp.py`)
 
-Not implemented. See [metrics_catalog.md](metrics_catalog.md).
+Reuses the open-loop AC simulation from `run_ac.py` (same engines). Near GBW,
+reports **`peak_db`**: maximum excess gain (dB) over an ideal single-pole rolloff
+in `[0.1×GBW, 10×GBW]`, plus **`peak_freq_hz`**.
+
+| Output | Definition | Unit |
+| --- | --- | --- |
+| `peak_db` | Max gain excess over 1-pole ideal near GBW | dB |
+| `peak_freq_hz` | Frequency of `peak_db` | Hz |
+
+Artifacts: `ac_comp.svg`, `AC_COMP_REPORT.md`; merges `peak_db` into `opamp_metrics.json` → `ac`.
 
 ## Unified outputs
 

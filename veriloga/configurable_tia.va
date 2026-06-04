@@ -1,5 +1,7 @@
-// Transimpedance amplifier — op-amp + feedback (shell).
-// TODO: instantiate configurable_opamp and Rf || Cf network.
+// Transimpedance amplifier — op-amp + Rf || Cf feedback (inverting).
+//
+// Small-signal matches Python tia.py: inverting summing node, AOL core,
+// feedback Rf||Cf from out to inn, input shunt Rin||(Cin+Cs).
 
 `include "constants.vams"
 `include "disciplines.vams"
@@ -13,11 +15,48 @@ module configurable_tia(iin, inp, inn, out, vdd, vss);
 
     parameter real RF_OHM = 100.0e3;
     parameter real CF_F = 100.0e-15;
+    parameter real CS_F = 0.0;
     parameter real A0_DB = 80.0;
     parameter real GBW_HZ = 10.0e6;
+    parameter real RIN_OHM = 1.0e12;
+    parameter real CIN_F = 1.0e-12;
+    parameter real ROUT_OHM = 100.0;
+    parameter real COUT_F = 2.0e-12;
+
+    real a0_linear;
+    real wp;
+    real numer[0:1];
+    real denom_op[0:1];
 
     analog begin
-        V(out) <+ 0.0;
+        @(initial_step) begin
+            a0_linear = pow(10.0, A0_DB / 20.0);
+            if (a0_linear < 1.0)
+                a0_linear = 1.0;
+            wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
+            numer[0] = a0_linear * wp;
+            numer[1] = 0.0;
+            denom_op[0] = wp;
+            denom_op[1] = 1.0;
+        end
+
+        I(inn) <+ I(iin);
+        if (RF_OHM > 0.0)
+            I(inn, out) <+ V(inn, out) / RF_OHM;
+        if (CF_F > 0.0)
+            I(inn, out) <+ CF_F * ddt(V(inn, out));
+
+        if (RIN_OHM > 0.0)
+            I(inn) <+ V(inn) / RIN_OHM;
+        if (CIN_F + CS_F > 0.0)
+            I(inn) <+ (CIN_F + CS_F) * ddt(V(inn));
+
+        V(out) <+ laplace_nd(V(inp) - V(inn), numer, denom_op);
+
+        if (ROUT_OHM > 0.0)
+            I(out) <+ V(out) / ROUT_OHM;
+        if (COUT_F > 0.0)
+            I(out) <+ COUT_F * ddt(V(out));
     end
 
 endmodule

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from opamp_model.cli_helpers import resolve_engine_label
-from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.config import OpampConfig, OpampNoiseConfig, TiaConfig
 from opamp_model.metrics import MetricEntry, OpampMetricsReport, format_metrics_table
 from opamp_model.tran import ThdMetrics
 
@@ -141,6 +141,69 @@ def write_ac_report(
     return path
 
 
+def _tia_config_table(tia: TiaConfig) -> str:
+    """Summarize TIA feedback parameters."""
+    rows = [
+        ("Rf", f"{tia.rf_ohm:.6g}", "Ω"),
+        ("Cf", f"{tia.cf_f:.6g}", "F"),
+        ("Cs", f"{tia.cs_f:.6g}", "F"),
+        ("Input", "current" if tia.current_input else "voltage", "—"),
+    ]
+    lines = [
+        "### TIA feedback",
+        "",
+        "| Parameter | Value | Unit |",
+        "| --- | --- | --- |",
+    ]
+    for name, val, unit in rows:
+        lines.append(f"| {name} | {val} | {unit} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_tia_report(
+    output_dir: Path,
+    *,
+    engine: str,
+    cfg: OpampConfig,
+    tia: TiaConfig,
+    report: OpampMetricsReport,
+    zt_svg: Path,
+) -> Path:
+    """Write ``TIA_REPORT.md`` with transimpedance plot and metrics."""
+    path = output_dir / "TIA_REPORT.md"
+    engine_label = resolve_engine_label(engine)
+    unit = "Ω" if tia.current_input else "V/V"
+    lines = [
+        "# TIA AC bench",
+        "",
+        f"- **Engine:** {engine_label} (`{engine}`)",
+        f"- **Generated:** {_utc_timestamp()}",
+        f"- **Transfer:** Vout / Iin ({unit})",
+        "",
+        _config_table(cfg),
+        _tia_config_table(tia),
+        "## Figures",
+        "",
+        _figure_block(zt_svg.name, f"Closed-loop transimpedance |Zt| ({unit})"),
+        "",
+        "## Metrics",
+        "",
+        format_metrics_markdown(report.get("tia", {}), heading="TIA (simulated)"),
+        "",
+        "## Artifacts",
+        "",
+        "| File | Description |",
+        "| --- | --- |",
+        f"| `{zt_svg.name}` | Transimpedance plot (SVG) |",
+        "| `tia_zt.csv` | Frequency, |Zt|, Zt (dB), phase |",
+        "| `opamp_metrics.json` | Scalar metrics bundle |",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
 def write_psrr_report(
     output_dir: Path,
     *,
@@ -197,6 +260,7 @@ def write_thd_report(
     """Write ``THD_REPORT.md`` with waveform, spectrum, and distortion metrics."""
     path = output_dir / "THD_REPORT.md"
     engine_label = resolve_engine_label(engine)
+    scaffold = _tran_scaffold_note(engine)
     lines = [
         "# THD / large-signal sine bench",
         "",
@@ -206,6 +270,11 @@ def write_thd_report(
         f"- **Sine:** {amplitude_v:.6g} V peak @ {freq_hz:.6g} Hz",
         f"- **Nonlinearity:** nl_a2={cfg.nl_a2:.6g}, nl_a3={cfg.nl_a3:.6g}",
         "",
+    ]
+    if scaffold:
+        lines.append(scaffold)
+    lines.extend(
+        [
         _config_table(cfg),
         "## Figures",
         "",
@@ -215,7 +284,8 @@ def write_thd_report(
         "## Metrics",
         "",
         format_metrics_markdown(report["large_signal"], heading="Large-signal / distortion"),
-    ]
+        ]
+    )
     if thd is not None and np.isfinite(thd["thd_db"]):
         lines.extend(
             [
@@ -258,6 +328,7 @@ def write_slew_report(
     path = output_dir / "SLEW_REPORT.md"
     engine_label = resolve_engine_label(engine)
     ls = report["large_signal"]
+    scaffold = _tran_scaffold_note(engine)
     lines = [
         "# TRAN slew-rate bench",
         "",
@@ -265,6 +336,11 @@ def write_slew_report(
         f"- **Generated:** {_utc_timestamp()}",
         f"- **Extraction:** 10–90 % output swing (see `tran.extract_slew_rate`)",
         "",
+    ]
+    if scaffold:
+        lines.append(scaffold)
+    lines.extend(
+        [
         _config_table(cfg),
         "## Figures",
         "",
@@ -282,9 +358,73 @@ def write_slew_report(
         "| `slew_step.csv` | Time, Vout (positive step), Vout (negative step) |",
         "| `opamp_metrics.json` | Scalar metrics bundle |",
         "",
+        ]
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def write_ac_comp_report(
+    output_dir: Path,
+    *,
+    engine: str,
+    cfg: OpampConfig,
+    report: OpampMetricsReport,
+    comp_svg: Path,
+    peak_db: float,
+    peak_freq_hz: float,
+    gbw_hz: float,
+) -> Path:
+    """Write ``AC_COMP_REPORT.md`` with peaking plot and metrics."""
+    path = output_dir / "AC_COMP_REPORT.md"
+    engine_label = resolve_engine_label(engine)
+    lines = [
+        "# AC compensation / gain peaking",
+        "",
+        f"- **Engine:** {engine_label} (`{engine}`)",
+        f"- **Generated:** {_utc_timestamp()}",
+        "- **Metric:** `peak_db` — max excess gain over ideal single-pole rolloff "
+        f"in [{0.1:.0g}×GBW, {10:.0g}×GBW]",
+        "",
+        _config_table(cfg),
+        "## Summary",
+        "",
+        f"| Quantity | Value |",
+        "| --- | --- |",
+        f"| GBW | {gbw_hz:.6g} Hz |",
+        f"| Peak excess | {peak_db:.4g} dB |",
+        f"| Peak frequency | {peak_freq_hz:.6g} Hz |",
+        "",
+        "## Figures",
+        "",
+        _figure_block(comp_svg.name, "Open-loop Bode with GBW and peaking markers"),
+        "",
+        "## Metrics",
+        "",
+        format_metrics_markdown(report["ac"], heading="AC / open-loop (incl. peaking)"),
+        "",
+        "## Artifacts",
+        "",
+        "| File | Description |",
+        "| --- | --- |",
+        f"| `{comp_svg.name}` | Peaking Bode plot (SVG) |",
+        "| `ac_bode.csv` | Open-loop Bode (from AC sim) |",
+        "| `opamp_metrics.json` | Scalar metrics bundle |",
+        "",
     ]
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _tran_scaffold_note(engine: str) -> str:
+    """Explain when TRAN curves still come from the Python macromodel."""
+    if engine == "python":
+        return ""
+    return (
+        f"- **TRAN scaffold:** `{engine}` runs a minimal netlist (`.op` only); "
+        "waveforms and extracted metrics use the **Python behavioral TRAN** model "
+        "until full SPICE macromodel TRAN netlists exist. See `docs/MODEL.md`.\n"
+    )
 
 
 def write_stb_report(
@@ -407,8 +547,8 @@ def preserve_metrics_sections(
     if previous is None:
         return report
     merged = dict(report)
-    if not merged["ac"] and previous.get("ac"):
-        merged["ac"] = previous["ac"]
+    if previous.get("ac"):
+        merged["ac"] = _merge_reported_metrics(merged.get("ac", {}), previous["ac"])
     if not merged["stb"] and previous.get("stb"):
         merged["stb"] = previous["stb"]
     if previous.get("noise"):
@@ -423,6 +563,8 @@ def preserve_metrics_sections(
             merged.get("large_signal", {}),
             previous["large_signal"],
         )
+    if not merged.get("tia") and previous.get("tia"):
+        merged["tia"] = previous["tia"]
     return OpampMetricsReport(**merged)
 
 
@@ -434,6 +576,8 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
     noise_report = output_dir / "NOISE_REPORT.md"
     slew_report = output_dir / "SLEW_REPORT.md"
     thd_report = output_dir / "THD_REPORT.md"
+    tia_report = output_dir / "TIA_REPORT.md"
+    ac_comp_report = output_dir / "AC_COMP_REPORT.md"
     if (
         not ac_report.is_file()
         and not stb_report.is_file()
@@ -441,6 +585,8 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         and not noise_report.is_file()
         and not slew_report.is_file()
         and not thd_report.is_file()
+        and not tia_report.is_file()
+        and not ac_comp_report.is_file()
     ):
         return None
 
@@ -457,6 +603,8 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
     ]
     if ac_report.is_file():
         lines.append("- [AC open-loop](AC_REPORT.md)")
+    if ac_comp_report.is_file():
+        lines.append("- [AC gain peaking](AC_COMP_REPORT.md)")
     if stb_report.is_file():
         lines.append("- [STB loop gain](STB_REPORT.md)")
     if psrr_report.is_file():
@@ -467,9 +615,12 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         lines.append("- [TRAN slew rate](SLEW_REPORT.md)")
     if thd_report.is_file():
         lines.append("- [THD](THD_REPORT.md)")
+    if tia_report.is_file():
+        lines.append("- [TIA AC](TIA_REPORT.md)")
     lines.extend(["", "## Figures", ""])
     for name, caption in (
         ("ac_bode.svg", "Open-loop Bode"),
+        ("ac_comp.svg", "Gain peaking near GBW"),
         ("impedance.svg", "Impedance"),
         ("cmrr.svg", "ACM / CMRR"),
         ("stb_bode.svg", "Loop-gain Bode"),
@@ -478,6 +629,7 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         ("slew.svg", "Step response / slew"),
         ("thd_waveform.svg", "THD sine waveform"),
         ("thd_spectrum.svg", "THD harmonic spectrum"),
+        ("tia_zt.svg", "TIA transimpedance"),
     ):
         fig = output_dir / name
         if fig.is_file():
@@ -512,6 +664,7 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
             "| `noise_spectrum.csv` | Noise spectrum data |",
             "| `slew_step.csv` | TRAN step data |",
             "| `thd_waveform.csv` | THD sine waveform |",
+            "| `tia_zt.csv` | TIA transimpedance data |",
             "| `logs/` | Simulation logs |",
             "",
         ]

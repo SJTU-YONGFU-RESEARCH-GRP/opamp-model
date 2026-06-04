@@ -23,7 +23,9 @@ from opamp_model.report import (
     write_engine_report,
     write_thd_report,
 )
+from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
+from opamp_model.spectre_engine import SpectreNotFoundError, run_spectre_tran_stub
 from opamp_model.tran import (
     compute_thd,
     is_thd_ideal,
@@ -66,9 +68,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.simulator != "python":
-        raise SystemExit("THD bench uses the Python behavioral model only (--simulator python).")
-
     cfg = build_opamp_config(args)
     noise = build_noise_config(args)
     out_dir = Path(args.output_dir)
@@ -77,6 +76,26 @@ def main() -> None:
     log = SimulationLog(out_dir / "logs" / "python_thd.log")
     log.write_header("thd", resolve_engine_label(args.simulator), cfg, noise)
     log_run_context(log)
+
+    try:
+        if args.simulator == "ngspice":
+            run_ngspice_tran_stub(
+                cfg,
+                out_dir,
+                template_name="thd_stub.cir",
+                log_name="ngspice_thd_stub.log",
+            )
+        elif args.simulator == "spectre":
+            run_spectre_tran_stub(
+                cfg,
+                out_dir,
+                template_name="thd_stub.scs",
+                log_name="spectre_thd_stub.log",
+            )
+    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+        log.write(str(exc))
+        log.close()
+        raise SystemExit(str(exc)) from exc
 
     time_s, vout_v = simulate_sine_response(
         cfg,

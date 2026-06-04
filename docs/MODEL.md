@@ -111,13 +111,13 @@ All engines must implement the **same** equations in this document; none is auth
 
 | Bench | Python | ngspice | Spectre |
 | --- | --- | --- | --- |
-| AC open-loop | Macromodel | ``ac_open_loop.cir`` → ``wrdata`` parsed | ``ac_open_loop.scs`` runs; Bode from Python until PSF parser |
-| STB loop gain | ``beta * A_open`` | Same AC netlist; ``loop_beta`` applied in ``run_stb.py`` | Same as AC (Python Bode today) |
+| AC open-loop | Macromodel | ``ac_open_loop.cir``: ideal VCVS + RC with ``Rlp·Clp=1/wp`` (one-pole, same as ``laplace_nd``); ``wrdata`` parsed | ``ac_open_loop.scs`` runs; Bode from Python until PSF parser |
+| STB loop gain | ``beta * A_open`` | ``stb_loop.cir`` (same one-pole macromodel); ``loop_beta`` applied in ``run_stb.py`` | Same as AC (Python Bode today) |
 | Noise | Macromodel spectrum | ``noise_stub.cir`` runs; spectrum from Python | ``noise_stub.scs`` runs; spectrum from Python |
 | PSRR | Macromodel | Python only (``psrr.scs`` stub) | Python only (``psrr.scs`` stub) |
 | Slew / THD | TRAN macromodel | Not wired | Not wired |
 
-**Scaffolding (temporary):** Spectre AC/STB and ngspice/Spectre noise substitute Python curves after the netlist run. This is not peer-engine behavior and must be replaced by PSF / ngspice noise parsers — do not treat Python as golden for those engines.
+**Scaffolding (temporary):** ngspice/Spectre noise still substitute Python spectra after the netlist run. Spectre AC/STB read Bode data from PSF (``src/opamp_model/spectre_psf.py``); do not treat Python as golden for Spectre AC metrics.
 
 ``docs/golden_metrics.yaml`` holds optional transistor-level reference targets for future ``compare_engines.py``; it is **not** an engine truth file.
 
@@ -125,11 +125,11 @@ All engines must implement the **same** equations in this document; none is auth
 
 | Module | Path | Status |
 | --- | --- | --- |
-| Voltage op-amp | [../veriloga/configurable_opamp.va](../veriloga/configurable_opamp.va) | Dominant-pole ``laplace_nd``, ``Rin‖Cin``, ``Rout‖Cout`` |
+| Voltage op-amp | [../veriloga/configurable_opamp.va](../veriloga/configurable_opamp.va) | Dominant-pole ``laplace_nd``, CMRR common-mode path, PSRR VDD feedthrough, ``Rin‖Cin``, ``Rout‖Cout`` |
 | TIA | [../veriloga/configurable_tia.va](../veriloga/configurable_tia.va) | Parameter shell (no closed-loop yet) |
 | Gm / OTA | [../veriloga/configurable_gm.va](../veriloga/configurable_gm.va) | Parameter shell |
 
-CMRR, PSRR, noise, slew, and weak nonlinearity are **not** in Verilog-A yet; Python implements them today.
+CMRR and PSRR are in Verilog-A (``CMRR_DB``, ``PSRR_DB``, ``PSRR_POLE_HZ``); noise, slew, and weak nonlinearity remain Python-only today.
 
 ## Python package
 

@@ -134,12 +134,25 @@ def build_noise_config(args: argparse.Namespace) -> OpampNoiseConfig:
     )
 
 
+def add_tia_args(parser: argparse.ArgumentParser) -> None:
+    """Register TIA feedback network arguments."""
+    parser.add_argument("--rf-ohm", type=float, default=100.0e3, help="Feedback R (ohm).")
+    parser.add_argument("--cf-f", type=float, default=100.0e-15, help="Feedback C (F).")
+    parser.add_argument("--cs-f", type=float, default=0.0, help="Sensor/input shunt C (F).")
+    parser.add_argument(
+        "--voltage-input",
+        action="store_true",
+        help="Voltage-input TIA (Vout/Vin) instead of current input.",
+    )
+
+
 def build_tia_config(args: argparse.Namespace) -> TiaConfig:
     """Build ``TiaConfig`` when TIA-specific args are present."""
     return TiaConfig(
-        rf_ohm=getattr(args, "rf_ohm", 100.0e3),
-        cf_f=getattr(args, "cf_f", 100.0e-15),
-        cs_f=getattr(args, "cs_f", 0.0),
+        rf_ohm=args.rf_ohm,
+        cf_f=args.cf_f,
+        cs_f=args.cs_f,
+        current_input=not getattr(args, "voltage_input", False),
     )
 
 
@@ -148,4 +161,5 @@ def build_gm_config(args: argparse.Namespace) -> GmConfig:
     return GmConfig(
         gm_s=getattr(args, "gm_s", 1.0e-3),
         rout_ohm=getattr(args, "gm_rout_ohm", 1.0e6),
+        cout_f=getattr(args, "gm_cout_f", 500.0e-15),
     )

@@ -9,7 +9,7 @@ Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductanc
 **Repository:** [SJTU-YONGFU-RESEARCH-GRP/amplifier-model](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model) (this package lives in the `opamp-model/` directory)
 
 - **License:** CC BY 4.0 (see [LICENSE](LICENSE))
-- **Planned:** TIA/Gm benches, `compare_engines.py`, Spectre PSF / full ngspice noise parsers (see [docs/metrics_catalog.md](docs/metrics_catalog.md))
+- **Planned:** TIA/Gm benches, Spectre PSF / full ngspice noise parsers (see [docs/metrics_catalog.md](docs/metrics_catalog.md))
 
 **Status:** Full macromodel on **python** (AC/STB, noise, CMRR/PSRR, slew, THD). **ngspice** parses AC/STB Bode from netlists; **spectre** runs decks but AC/noise curves are still Python-backed until PSF parsers land. Details: [docs/README.md](docs/README.md#quick-reference).
 
@@ -162,6 +162,7 @@ Exported symbols are listed in [`src/opamp_model/__init__.py`](src/opamp_model/_
 | `scripts/run_thd.py` | THD / harmonics (Python engine) |
 | `scripts/run_all_simulations.sh` | Batch all benches per engine |
 | `scripts/write_engine_report.py` | Aggregate `REPORT.md` for an engine |
+| `scripts/compare_engines.py` | Cross-engine spread on `opamp_metrics.json` |
 | `scripts/check_independence.sh` | Guard against legacy repo imports |
 
 Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ideal`, and macromodel parameters (`--a0-db`, `--gbw-hz`, `--cmrr-db`, `--psrr-db`, `--psrr-pole-hz`, `--rin-ohm`, `--rout-ohm`, `--loop-beta`, noise args, …). See [`src/opamp_model/cli_helpers.py`](src/opamp_model/cli_helpers.py).
@@ -179,7 +180,18 @@ Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ide
   scripts/run_*.py  →  outputs/<engine>/
 ```
 
-`docs/golden_metrics.yaml` holds optional transistor-level reference targets for future `compare_engines.py`; it is **not** an engine truth file. No engine is golden — temporary Python curve substitution for some spectre/ngspice paths is documented in [docs/MODEL.md](docs/MODEL.md#engine-parity-current).
+`docs/golden_metrics.yaml` holds optional transistor-level reference targets; it is **not** an engine truth file. No engine is golden — temporary Python curve substitution for some spectre/ngspice paths is documented in [docs/MODEL.md](docs/MODEL.md#engine-parity-current).
+
+### Compare engines
+
+After running benches for each engine, check peer spread against [docs/MODEL.md](docs/MODEL.md) limits (A0 0.1 dB, GBW 5%, phase margin 2°, integrated noise RMS 5%):
+
+```bash
+./scripts/run_all_simulations.sh --skip-missing
+python scripts/compare_engines.py --output-root outputs
+```
+
+Optional reference column from `docs/golden_metrics.yaml` (not used for pass/fail). Exit code is non-zero when spread exceeds tolerance.
 
 ## Metrics and outputs
 

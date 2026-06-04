@@ -13,6 +13,7 @@ THD_WAVEFORM_COLUMNS = ("time_s", "vout_v")
 CMRR_COLUMNS = ("frequency_hz", "acm_db", "cmrr_db")
 PSRR_COLUMNS = ("frequency_hz", "psrr_db")
 NOISE_COLUMNS = ("frequency_hz", "noise_v_per_sqrt_hz")
+TIA_COLUMNS = ("frequency_hz", "zt_ohm", "zt_db", "zt_phase_deg")
 
 
 def package_root() -> Path:
@@ -149,6 +150,20 @@ def write_thd_waveform_csv(
     path.parent.mkdir(parents=True, exist_ok=True)
     data = np.column_stack([time_s, vout_v])
     header = ",".join(THD_WAVEFORM_COLUMNS)
+    np.savetxt(path, data, delimiter=",", header=header, comments="")
+
+
+def write_tia_csv(
+    path: Path,
+    frequency_hz: NDArray[np.float64],
+    zt_ohm: NDArray[np.float64],
+    zt_db: NDArray[np.float64],
+    zt_phase_deg: NDArray[np.float64],
+) -> None:
+    """Write TIA AC CSV (frequency, |Zt|, Zt dB, phase)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = np.column_stack([frequency_hz, zt_ohm, zt_db, zt_phase_deg])
+    header = ",".join(TIA_COLUMNS)
     np.savetxt(path, data, delimiter=",", header=header, comments="")
 
 

@@ -20,7 +20,7 @@ Target figures of merit for **opamp-model**, mapped to benches and implementatio
 | Unity-gain BW `gbw_hz` | Hz | AC / STB | **reported** |
 | Phase margin `phase_margin_deg` | deg | STB | **reported** |
 | Gain margin `gain_margin_db` | dB | STB | **reported** (may be null if no −180° crossing) |
-| Gain peaking | dB | — | **planned** (`run_ac_comp.py`) |
+| Gain peaking `peak_db` | dB | AC comp | **reported** (`run_ac_comp.py`) |
 | Second pole / zero fit | Hz | AC | **planned** (optional fit from Bode) |
 
 ## Impedance
@@ -67,8 +67,14 @@ PSRR uses the Python macromodel for all engines until supply AC is modeled in Ve
 
 | Metric | Unit | Bench | Status |
 | --- | --- | --- | --- |
-| Transimpedance `Zt` | Ω | TIA AC | **planned** |
-| `gm` | S | Gm AC | **planned** |
+| Transimpedance `Zt` | Ω | TIA AC | **reported** (`run_tia_ac.py`, python) |
+| `Zt(f)` curve | Ω | TIA AC | **reported** (`tia_zt.csv`, `tia_zt.svg`) |
+| TIA bandwidth (−3 dB) | Hz | TIA AC | **reported** |
+| `gm` | S | Gm AC | **reported** (python) |
+| `rout_ohm`, `cout_f` | Ω / F | Gm AC | **param** |
+| Loaded gain (DC) | dB | Gm AC | **reported** (`gm_ac_bode`) |
+| Bandwidth (−3 dB) | Hz | Gm AC | **reported** |
+| `gm(f)` curve | S | Gm AC | **reported** (`gm_vs_f.svg`) |
 
 ## Unified report file (`opamp_metrics.json`)
 
@@ -96,6 +102,7 @@ outputs/<engine>/NOISE_REPORT.md
 outputs/<engine>/PSRR_REPORT.md
 outputs/<engine>/SLEW_REPORT.md      # python only
 outputs/<engine>/THD_REPORT.md       # python only
+outputs/<engine>/TIA_REPORT.md       # TIA AC
 outputs/<engine>/REPORT.md           # index + figure gallery
 outputs/<engine>/opamp_metrics.json
 outputs/<engine>/*.csv, *.svg

@@ -1,5 +1,5 @@
-// PSRR testbench stub (Cadence Spectre).
-// PSRR stub; metrics from scripts/run_psrr.py (Python macromodel).
+// PSRR compile/AC testbench (Cadence Spectre).
+// Supply AC on VDD; differential inputs quiet. Metrics from run_psrr.py (Python) until PSF parser.
 //
 // Run via:
 //   python scripts/run_psrr.py --output-dir outputs/spectre
@@ -8,10 +8,29 @@ simulator lang=spectre
 
 include "./testbench/spectre/opamp_include.scs"
 
+parameters a0_db=80
+parameters gbw_hz=10Meg
+parameters cmrr_db=90
 parameters psrr_db=80
 parameters psrr_pole_hz=100
+parameters rin_ohm=1T
+parameters cin_f=1p
+parameters rout_ohm=100
+parameters cout_f=2p
 parameters f_start=1
 parameters f_stop=100Meg
 parameters dec=10
 
-// TODO: supply AC stimulus and PSRR probe when Verilog-A includes PSRR path.
+VDD (vdd 0) vsource dc=1.8 type=sine ampl=0 freq=0 \
+    acmag=1 acphase=0
+VSS (vss 0) vsource dc=0.0
+VINP (inp 0) vsource dc=0.9 type=dc
+VINN (inn 0) vsource dc=0.9 type=dc
+
+XOP (inp inn out vdd vss) configurable_opamp \
+    A0_DB=a0_db GBW_HZ=gbw_hz CMRR_DB=cmrr_db PSRR_DB=psrr_db \
+    PSRR_POLE_HZ=psrr_pole_hz RIN_OHM=rin_ohm CIN_F=cin_f \
+    ROUT_OHM=rout_ohm COUT_F=cout_f
+
+save out vdd
+ac ac start=f_start stop=f_stop dec=dec annotate=status

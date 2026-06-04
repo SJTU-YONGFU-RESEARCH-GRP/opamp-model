@@ -1,0 +1,22 @@
+* TIA closed-loop AC stub (optional ngspice bench).
+* Python macromodel supplies Zt(f) metrics until ngspice VA path is wired.
+
+.title TIA AC stub
+.param rf_ohm=100k cf_f=100f
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+VCM inp 0 DC 0.9
+RLOAD out 0 100
+
+* Placeholder: replace with configurable_tia when ngspice AHDL is linked.
+RIN inn 0 1e12
+RF out inn {rf_ohm}
+CF out inn {cf_f}
+
+IIN iin 0 DC 0 AC 1
+RINJ inn iin 1
+
+.ac dec 10 1 100Meg
+.print ac vdb(out) vp(out)
+.end

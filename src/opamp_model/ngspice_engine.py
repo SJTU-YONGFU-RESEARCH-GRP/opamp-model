@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from opamp_model.ac import extract_gbw_phase_margin
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.core import dominant_pole_rad_s
 from opamp_model.io import package_root, read_ngspice_ac_wrdata, write_bode_csv
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult, simulate_noise
 
@@ -52,24 +53,33 @@ def _spectre_value(value: float) -> str:
     return f"{value:.12g}"
 
 
+# Reference capacitor for the dominant-pole RC (R*C = 1/wp); value only sets R scale.
+_CLP_REF_F = 1.0e-12
+
+
 def render_ngspice_ac_netlist(
     template_path: Path,
     cfg: OpampConfig,
 ) -> str:
-    """Render an ngspice AC netlist with macromodel parameters."""
+    """Render an ngspice AC netlist with one-pole macromodel parameters.
+
+    Pole placement matches ``dominant_pole_rad_s`` / Spectre ``laplace_nd``:
+    ``wp = 2*pi*GBW/A0``, ``Rlp*Clp = 1/wp`` with ``Clp = _CLP_REF_F``.
+    """
     text = template_path.read_text(encoding="utf-8")
     a0 = max(cfg.a0_linear, 1.0)
-    wp = 2.0 * np.pi * cfg.gbw_hz / a0
-    rlp_ohm = 1000.0
-    clp_f = 1.0 / (wp * rlp_ohm)
+    wp = dominant_pole_rad_s(cfg)
+    clp_f = _CLP_REF_F
+    rlp_ohm = 1.0 / (wp * clp_f)
     replacements = {
         "a0_db": str(cfg.a0_db),
         "gbw_hz": _spectre_value(cfg.gbw_hz),
         "rin_ohm": _spectre_value(cfg.rin_ohm),
         "rout_ohm": _spectre_value(cfg.rout_ohm),
+        "a0_linear": _spectre_value(a0),
+        "wp_rad_s": _spectre_value(wp),
         "rlp_ohm": _spectre_value(rlp_ohm),
         "clp_f": _spectre_value(clp_f),
-        "a0_linear": _spectre_value(a0),
     }
     for key, val in replacements.items():
         text = re.sub(
@@ -80,6 +90,8 @@ def render_ngspice_ac_netlist(
         )
     return (
         text.replace("PLACEHOLDER_A0", _spectre_value(a0))
+        .replace("PLACEHOLDER_WP", _spectre_value(wp))
+        .replace("PLACEHOLDER_RLP", _spectre_value(rlp_ohm))
         .replace("PLACEHOLDER_CLP", _spectre_value(clp_f))
     )
 
@@ -203,3 +215,36 @@ def simulate_noise_ngspice(
     """Run ngspice noise bench; spectrum must come from ngspice (stub today)."""
     run_ngspice_noise_stub(cfg, output_dir)
     return simulate_noise(cfg, noise)
+
+
+def run_ngspice_tran_stub(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    template_name: str,
+    log_name: str,
+) -> Path:
+    """Run a minimal ngspice TRAN stub (``.op`` only) to validate the toolchain."""
+    repo = package_root()
+    template = repo / "testbench" / "ngspice" / template_name
+    ng_dir = output_dir / "ngspice"
+    logs_dir = output_dir / "logs"
+    ng_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = ng_dir / template_name
+    netlist_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+    log_path = logs_dir / log_name
+    executable = find_ngspice_executable()
+    completed = subprocess.run(
+        [executable, "-b", netlist_path.name],
+        cwd=ng_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    if completed.returncode != 0:
+        msg = f"ngspice TRAN stub failed with code {completed.returncode}; see {log_path}"
+        raise RuntimeError(msg)
+    _ = cfg
+    return log_path
