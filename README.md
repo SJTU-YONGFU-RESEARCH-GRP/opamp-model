@@ -4,12 +4,12 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776ab.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue?logo=semver&logoColor=white)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model)
 
-Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductance (Gm)** behavioral models with a Python package, Verilog-A shells, and SPICE/Spectre testbenches. Peer engines (Python, ngspice, Spectre) implement the same macromodel equations documented in [MODEL.md](MODEL.md).
+Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductance (Gm)** behavioral models with a Python package, Verilog-A shells, and SPICE/Spectre testbenches. Peer engines (Python, ngspice, Spectre) implement the same macromodel equations documented in [docs/MODEL.md](docs/MODEL.md).
 
 **Repository:** [SJTU-YONGFU-RESEARCH-GRP/amplifier-model](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model) (this package lives in the `opamp-model/` directory)
 
 - **License:** CC BY 4.0 (see [LICENSE](LICENSE))
-- **Roadmap:** [../PLAN.md](../PLAN.md) (Phases 5–6: TIA/Gm benches, cross-engine comparison)
+- **Planned:** TIA/Gm benches, `compare_engines.py`, Spectre/ngspice result parsers (see [docs/metrics_catalog.md](docs/metrics_catalog.md))
 
 **Status:** Phases 1–4 — AC/STB, noise, CMRR/PSRR, slew, and THD benches across Python; ngspice and Spectre for small-signal benches when installed.
 
@@ -40,7 +40,7 @@ Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductanc
 | **Benches** | `run_ac.py`, `run_stb.py`, `run_noise.py`, `run_psrr.py`, `run_slew.py`, `run_thd.py` |
 | **Artifacts** | Per-bench `*_REPORT.md`, SVG plots, CSV sweeps, `opamp_metrics.json`, engine-level `REPORT.md` |
 
-No engine is treated as golden: each simulator must produce its own curves and metrics (see [reference/bench_spec.md](reference/bench_spec.md)).
+No engine is treated as golden: each simulator must produce its own curves and metrics (see [docs/bench_spec.md](docs/bench_spec.md)).
 
 ## Requirements
 
@@ -99,7 +99,7 @@ Example with ngspice (requires `ngspice` on `PATH`):
 python scripts/run_ac.py --simulator ngspice --output-dir outputs/ngspice
 ```
 
-Common macromodel overrides (defaults match [reference/golden_metrics.yaml](reference/golden_metrics.yaml)):
+Common macromodel overrides (defaults match [docs/golden_metrics.yaml](docs/golden_metrics.yaml)):
 
 ```bash
 python scripts/run_ac.py --a0-db 80 --gbw-hz 10e6 --cmrr-db 90 --ideal
@@ -146,7 +146,7 @@ Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ide
 ## Multi-engine workflow
 
 ```text
-  MODEL.md (equations)
+  docs/MODEL.md (equations)
         │
         ├── Python (src/opamp_model/)
         ├── ngspice (testbench/ngspice/*.cir)
@@ -156,7 +156,7 @@ Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ide
   scripts/run_*.py  →  outputs/<engine>/
 ```
 
-`reference/golden_metrics.yaml` holds optional transistor-level reference targets for future `compare_engines.py`; it is **not** an engine truth file.
+`docs/golden_metrics.yaml` holds optional transistor-level reference targets for future `compare_engines.py`; it is **not** an engine truth file.
 
 ## Metrics and outputs
 
@@ -170,17 +170,19 @@ Each engine directory under `outputs/` typically contains:
 | `*.csv`, `*.svg` | Sweeps and plots |
 | `logs/` | Simulation logs and netlist copies |
 
-Default frequency sweep: 1 Hz–100 MHz, 10 points per decade ([reference/bench_spec.md](reference/bench_spec.md)).
+Default frequency sweep: 1 Hz–100 MHz, 10 points per decade ([docs/bench_spec.md](docs/bench_spec.md)).
 
 ## Project layout
 
 ```text
 opamp-model/
 ├── LICENSE
-├── MODEL.md                 # Equations and multi-engine rules
+├── MODEL.md                 # Pointer to docs/MODEL.md
 ├── pyproject.toml
-├── reference/
+├── docs/
+│   ├── MODEL.md             # Equations and multi-engine rules
 │   ├── bench_spec.md        # Bench and metric definitions
+│   ├── metrics_catalog.md   # Metric index
 │   └── golden_metrics.yaml  # Optional reference targets
 ├── veriloga/
 │   ├── configurable_opamp.va
@@ -199,8 +201,10 @@ opamp-model/
 
 | Document | Purpose |
 | --- | --- |
-| [MODEL.md](MODEL.md) | Small-signal equations, CMRR/PSRR, engine parity rules |
-| [reference/bench_spec.md](reference/bench_spec.md) | Bench definitions, probes, default sweeps |
+| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/MODEL.md](docs/MODEL.md) | Small-signal equations, CMRR/PSRR, engine parity rules |
+| [docs/bench_spec.md](docs/bench_spec.md) | Bench definitions, probes, default sweeps |
+| [docs/metrics_catalog.md](docs/metrics_catalog.md) | Metric names and status |
 | [../PLAN.md](../PLAN.md) | Full project plan and phased delivery |
 | [testbench/ngspice/README.md](testbench/ngspice/README.md) | ngspice netlist notes |
 | [testbench/spectre/README.md](testbench/spectre/README.md) | Spectre deck notes |
