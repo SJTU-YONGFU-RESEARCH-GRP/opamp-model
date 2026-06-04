@@ -1,5 +1,5 @@
-// Transimpedance amplifier — op-amp + feedback (Phase 0 shell).
-// Phase 5: instantiate configurable_opamp and Rf || Cf network.
+// Transimpedance amplifier — op-amp + feedback (shell).
+// TODO: instantiate configurable_opamp and Rf || Cf network.
 
 `include "constants.vams"
 `include "disciplines.vams"

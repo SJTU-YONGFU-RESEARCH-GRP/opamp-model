@@ -137,7 +137,7 @@ def simulate_ac_spectre(
 
 
 def run_spectre_noise_stub(cfg: OpampConfig, output_dir: Path) -> Path:
-    """Render and execute a Spectre noise stub netlist (Phase 3)."""
+    """Render and execute a Spectre noise stub netlist."""
     repo = package_root()
     template = repo / "testbench" / "spectre" / "noise_stub.scs"
     logs_dir = output_dir / "logs" / "netlists"

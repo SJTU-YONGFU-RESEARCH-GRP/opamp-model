@@ -1,6 +1,6 @@
 # Spectre testbenches
 
-Netlists (`.scs`) for AC, STB, noise, PSRR, transient, TIA, and Gm runs are added in **Phase 1+**.
+Netlists (`.scs`) cover AC, STB, noise, PSRR, and stubs for transient, TIA, and Gm benches.
 
 Requirements:
 

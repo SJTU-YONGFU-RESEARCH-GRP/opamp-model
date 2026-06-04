@@ -1,5 +1,5 @@
 // PSRR testbench stub (Cadence Spectre).
-// Phase 4 Python golden: scripts/run_psrr.py
+// PSRR stub; metrics from scripts/run_psrr.py (Python macromodel).
 //
 // Run via:
 //   python scripts/run_psrr.py --output-dir outputs/spectre

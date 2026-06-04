@@ -1,4 +1,4 @@
-// Op-amp noise analysis stub (Phase 3).
+// Op-amp noise analysis stub.
 // Validates Spectre; noise spectrum/metrics come from the Python golden.
 
 simulator lang=spectre

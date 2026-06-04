@@ -1,4 +1,4 @@
-"""Integrated and spot noise analysis (Phase 3+)."""
+"""Integrated and spot noise analysis."""
 
 from __future__ import annotations
 

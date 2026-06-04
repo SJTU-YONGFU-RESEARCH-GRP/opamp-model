@@ -1,4 +1,4 @@
-"""Transimpedance amplifier composition (Phase 5+)."""
+"""Transimpedance amplifier composition (not yet implemented)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def closed_loop_transimpedance(
     """Return transimpedance vs frequency.
 
     Raises:
-        NotImplementedError: Phase 5.
+        NotImplementedError: TIA model not implemented yet.
     """
     _ = (opamp, tia, noise)
-    raise NotImplementedError("TIA closed-loop model is implemented in Phase 5.")
+    raise NotImplementedError("TIA closed-loop model is not implemented yet.")

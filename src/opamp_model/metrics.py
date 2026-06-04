@@ -201,7 +201,7 @@ def build_large_signal_entries(
     slew_pos_measured: float | None = None,
     slew_neg_measured: float | None = None,
 ) -> dict[str, MetricEntry]:
-    """Large-signal parameters; TRAN benches in Phase 2."""
+    """Large-signal parameters; measured by TRAN benches when available."""
     if slew_pos_measured is not None and np.isfinite(slew_pos_measured):
         slew_pos = _metric(
             slew_pos_measured,

@@ -1,7 +1,7 @@
-// Configurable voltage op-amp — dominant-pole differential macromodel (Phase 1).
+// Configurable voltage op-amp — dominant-pole differential macromodel.
 //
 // Open-loop: H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ/A0_LINEAR
-// Phase 1: ideal small-signal only (no CMRR/PSRR/noise/slew).
+// Ideal small-signal only (no CMRR/PSRR/noise/slew in this module yet).
 
 `include "constants.vams"
 `include "disciplines.vams"

@@ -1,4 +1,4 @@
-"""CMRR and PSRR macromodel tests (Phase 4)."""
+"""CMRR and PSRR macromodel tests."""
 
 from __future__ import annotations
 

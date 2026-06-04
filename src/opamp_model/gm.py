@@ -1,4 +1,4 @@
-"""Transconductance (Gm / OTA) model (Phase 5+)."""
+"""Transconductance (Gm / OTA) model (not yet implemented)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ def transconductance_transfer(
     """Return Gm transfer vs frequency.
 
     Raises:
-        NotImplementedError: Phase 5.
+        NotImplementedError: Gm model not implemented yet.
     """
     _ = (gm_cfg, frequency_hz, noise)
-    raise NotImplementedError("Gm transfer is implemented in Phase 5.")
+    raise NotImplementedError("Gm transfer is not implemented yet.")

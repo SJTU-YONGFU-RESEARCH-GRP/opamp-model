@@ -27,12 +27,12 @@ def open_loop_transfer(
 
     ``H(s) = A0 / (1 + s/wp)`` with optional second pole and zero when configured.
     Input/output loading (Rin, Cin, Rout, Cout) does not modify the ideal voltage
-    gain in Phase 1; impedances are exposed via :mod:`opamp_model.impedance`.
+    ideal open-loop gain; impedances are exposed via :mod:`opamp_model.impedance`.
 
     Args:
         cfg: Op-amp macromodel parameters.
         frequency_hz: Frequency samples (Hz).
-        noise: Reserved for Phase 3 (ignored in Phase 1).
+        noise: Reserved for future noise coupling (ignored in AC).
 
     Returns:
         Complex open-loop gain at each frequency.

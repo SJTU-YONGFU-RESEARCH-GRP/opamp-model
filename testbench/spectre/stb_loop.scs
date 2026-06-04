@@ -1,5 +1,5 @@
 // Loop-gain AC testbench — unity feedback factor (beta=1) via diff input drive.
-// Phase 1: same open-loop path as AC; loop_beta applied in Python STB reference.
+// Same open-loop path as AC; loop_beta applied in run_stb.py for ngspice/spectre.
 
 simulator lang=spectre
 

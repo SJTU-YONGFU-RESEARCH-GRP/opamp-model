@@ -21,7 +21,7 @@ Usage: $(basename "$0") [OPTIONS] [-- EXTRA_ARGS...]
 Run all op-amp benches for each available engine under:
   \${OUTPUT_ROOT}/{python,ngspice,spectre}/
 
-Transient benches (slew, THD) run for python only (Phase 2).
+Transient benches (slew, THD) run for the python engine only.
 
 Options:
   --output-root DIR   Base output directory (default: ${ROOT_DIR}/outputs).

@@ -89,7 +89,7 @@ class SimulationLog:
 
 
 def tee_stdout_to_log(log_path: Path) -> SimulationLog:
-    """Return a log handle; callers may redirect stdout in later phases."""
+    """Return a log handle; callers may redirect stdout when needed."""
     return SimulationLog(log_path)
 
 

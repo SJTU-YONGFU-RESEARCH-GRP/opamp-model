@@ -169,7 +169,7 @@ def simulate_ac_ngspice(
 
 
 def run_ngspice_noise_stub(cfg: OpampConfig, output_dir: Path) -> Path:
-    """Run an ngspice noise stub netlist (Phase 3)."""
+    """Run an ngspice noise stub netlist."""
     repo = package_root()
     template = repo / "testbench" / "ngspice" / "noise_stub.cir"
     ng_dir = output_dir / "ngspice"

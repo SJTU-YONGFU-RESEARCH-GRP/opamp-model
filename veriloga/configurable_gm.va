@@ -1,5 +1,5 @@
-// Transconductance (Gm / OTA) macromodel (Phase 0 shell).
-// Phase 5: Iout = GM_S * (V(inp) - V(inn)) with Rout || Cout.
+// Transconductance (Gm / OTA) macromodel (shell).
+// TODO: Iout = GM_S * (V(inp) - V(inn)) with Rout || Cout.
 
 `include "constants.vams"
 `include "disciplines.vams"

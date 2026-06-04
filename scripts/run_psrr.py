@@ -46,7 +46,7 @@ def main() -> None:
     log_run_context(log)
 
     if args.simulator != "python":
-        log.write("PSRR bench uses Python golden model in Phase 4.")
+        log.write("PSRR bench: Python macromodel (Spectre/ngspice stub when used).")
     result = simulate_psrr(cfg)
 
     csv_path = out_dir / "psrr.csv"

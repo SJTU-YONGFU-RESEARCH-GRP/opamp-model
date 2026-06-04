@@ -1,4 +1,4 @@
-"""Common-mode and power-supply rejection transfer functions (Phase 4)."""
+"""Common-mode and power-supply rejection transfer functions."""
 
 from __future__ import annotations
 

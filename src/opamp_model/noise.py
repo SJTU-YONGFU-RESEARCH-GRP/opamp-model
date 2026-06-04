@@ -1,4 +1,4 @@
-"""Noise density models: white, flicker, shot (Phase 3+)."""
+"""Noise density models: white, flicker, shot."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def input_referred_en(
 ) -> NDArray[np.float64]:
     """Return input-referred voltage noise density (V/√Hz) vs ``frequency_hz``.
 
-    Phase 0 implements the white + flicker skeleton so tests can validate units.
+    White plus flicker terms; tests validate units and integration.
     """
     f = np.maximum(np.asarray(frequency_hz, dtype=np.float64), 1.0e-30)
     white = np.full_like(f, noise.en_white_v_per_sqrt_hz)

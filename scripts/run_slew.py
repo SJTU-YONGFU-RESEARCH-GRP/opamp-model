@@ -106,7 +106,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.simulator != "python":
-        raise SystemExit("run_slew.py supports --simulator python only in Phase 2.")
+        raise SystemExit("run_slew.py supports --simulator python only.")
 
     cfg = _cfg_for_slew(args, ideal=args.ideal)
     noise = build_noise_config(args)

@@ -1,4 +1,4 @@
-* Open-loop AC Bode — ngspice RC-pole + VCVS macromodel (Phase 1).
+* Open-loop AC Bode — ngspice RC-pole + VCVS macromodel.
 * Run via: python scripts/run_ac.py --ngspice --output-dir outputs/ngspice
 
 .param a0_db=80

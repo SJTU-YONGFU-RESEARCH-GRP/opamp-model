@@ -1,4 +1,4 @@
-"""Transient analysis: slew rate and THD (Phase 2+)."""
+"""Transient analysis: slew rate and THD."""
 
 from __future__ import annotations
 
@@ -68,7 +68,7 @@ def simulate_step_response(
 
     Args:
         cfg: Op-amp macromodel parameters.
-        noise: Reserved for Phase 3 (ignored).
+        noise: Reserved for future noise coupling (ignored).
         step_v: Input step amplitude (V) applied at ``t = 0`` relative to ``vcm_v``.
         duration_s: Simulation stop time (s).
         dt_s: Time step (s).

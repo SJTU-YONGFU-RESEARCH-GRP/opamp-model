@@ -5,14 +5,25 @@
 # Units:
 #   *_db — decibels
 #   *_hz — hertz
+#   *_ohm, *_f — ohms, farads
 #   slew_v_per_us — volts per microsecond
 #   en_white_nv_per_sqrt_hz — nanovolts per sqrt(hertz), input-referred
 
 a0_db: 80.0
 gbw_hz: 10.0e6
 phase_margin_deg: 60.0
+gain_margin_db: null  # optional; may be absent if no -180 deg crossing
 cmrr_db: 90.0
 psrr_db: 80.0
+psrr_pole_hz: 100.0
+fp2_hz: 200.0e6
+fz_hz: 0.0
+rin_ohm: 1.0e12
+cin_f: 1.0e-12
+rout_ohm: 100.0
+cout_f: 2.0e-12
+loop_beta: 1.0
 slew_v_per_us: 10.0
 en_white_nv_per_sqrt_hz: 5.0
 en_flicker_corner_hz: 100.0
+en_flicker_at_1hz_nv_per_sqrt_hz: 50.0

@@ -1,4 +1,4 @@
-"""Input and output impedance helpers (Phase 1+)."""
+"""Input and output impedance helpers."""
 
 from __future__ import annotations
 
@@ -21,14 +21,14 @@ from opamp_model.plot_style import (
 
 
 def zin_diff(cfg: OpampConfig, frequency_hz: NDArray[np.float64]) -> NDArray[np.complex128]:
-    """Return differential input impedance vs frequency (Phase 0: Rin || Cin)."""
+    """Return differential input impedance vs frequency (Rin || Cin)."""
     omega = 2.0 * np.pi * frequency_hz.astype(np.float64)
     cap = 1.0 / (1j * omega * cfg.cin_f) if cfg.cin_f > 0.0 else np.inf
     return 1.0 / (1.0 / cfg.rin_ohm + 1.0 / cap)
 
 
 def zout(cfg: OpampConfig, frequency_hz: NDArray[np.float64]) -> NDArray[np.complex128]:
-    """Return output impedance vs frequency (Phase 0: Rout || Cout)."""
+    """Return output impedance vs frequency (Rout || Cout)."""
     omega = 2.0 * np.pi * frequency_hz.astype(np.float64)
     cap = 1.0 / (1j * omega * cfg.cout_f) if cfg.cout_f > 0.0 else np.inf
     return 1.0 / (1.0 / cfg.rout_ohm + 1.0 / cap)
