@@ -27,7 +27,12 @@ from opamp_model.report import (
 from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, log_run_context
 from opamp_model.spectre_engine import SpectreNotFoundError, run_spectre_tran_stub
-from opamp_model.tran import measure_slew_rates, plot_slew_step
+from opamp_model.tran import (
+    measure_slew_rates,
+    plot_slew_step,
+    plot_transient_noise_trace,
+    transient_noise_rms,
+)
 
 
 def _cfg_for_slew(args: argparse.Namespace, *, ideal: bool) -> OpampConfig:
@@ -146,8 +151,18 @@ def main() -> None:
 
     csv_path = out_dir / "slew_step.csv"
     write_slew_step_csv(csv_path, pos["time_s"], pos["vout_v"], neg["vout_v"])
+    noise_rms_v = transient_noise_rms(pos["noise_v"]) if noise.enabled else 0.0
     slew_svg = out_dir / "slew.svg"
-    plot_slew_step(pos, neg, slew_svg, metrics=metrics)
+    plot_slew_step(pos, neg, slew_svg, metrics=metrics, noise_rms_v=noise_rms_v)
+    noise_trace_svg: Path | None = None
+    if noise.enabled and noise_rms_v > 0.0:
+        noise_trace_svg = out_dir / "slew_noise.svg"
+        plot_transient_noise_trace(
+            pos["time_s"],
+            pos["noise_v"],
+            noise_trace_svg,
+            noise_rms_v=noise_rms_v,
+        )
 
     report = build_metrics_report(
         cfg,
@@ -165,6 +180,9 @@ def main() -> None:
         cfg=cfg,
         report=report,
         slew_svg=slew_svg,
+        noise=noise,
+        noise_rms_v=noise_rms_v,
+        noise_trace_svg=noise_trace_svg,
     )
     engine_md = write_engine_report(out_dir, engine=args.simulator)
 

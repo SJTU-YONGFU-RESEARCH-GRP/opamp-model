@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-_PSF_VERSION_RE = re.compile(r'"PSFversion"\s+"([^"]+)"', re.IGNORECASE)
 _ANALYSIS_DATA_RE = re.compile(
     r'"([^"]+)"\s+"analysisInst"\s*\(\s*[^"]*"\s*[^"]*"\s*([^"]+)"',
     re.DOTALL,
@@ -60,8 +59,8 @@ def _read_logfile_analysis_psf(log_file: Path) -> str | None:
     return None
 
 
-def resolve_ac_psf_path(raw_dir: Path) -> Path:
-    """Resolve the AC PSF member inside a Spectre ``.raw`` directory."""
+def _resolve_psf_member(raw_dir: Path, *, extensions: tuple[str, ...]) -> Path:
+    """Resolve a PSF data member by ``logFile`` hint or unique extension match."""
     log_file = raw_dir / "logFile"
     if log_file.is_file():
         member = _read_logfile_analysis_psf(log_file)
@@ -70,18 +69,25 @@ def resolve_ac_psf_path(raw_dir: Path) -> Path:
             if candidate.is_file():
                 return candidate
 
-    ac_members = sorted(raw_dir.glob("*.ac"))
-    if len(ac_members) == 1:
-        return ac_members[0]
-    if ac_members:
-        return ac_members[0]
+    for ext in extensions:
+        members = sorted(raw_dir.glob(f"*{ext}"))
+        if len(members) == 1:
+            return members[0]
+        if members:
+            return members[0]
 
-    psf_members = sorted(raw_dir.glob("*.psf"))
-    if len(psf_members) == 1:
-        return psf_members[0]
-
-    msg = f"No AC PSF member found under {raw_dir}"
+    msg = f"No PSF member {extensions} found under {raw_dir}"
     raise SpectrePsfError(msg)
+
+
+def resolve_ac_psf_path(raw_dir: Path) -> Path:
+    """Resolve the AC PSF member inside a Spectre ``.raw`` directory."""
+    return _resolve_psf_member(raw_dir, extensions=(".ac", ".psf"))
+
+
+def resolve_noise_psf_path(raw_dir: Path) -> Path:
+    """Resolve the noise-analysis PSF member inside a Spectre ``.raw`` directory."""
+    return _resolve_psf_member(raw_dir, extensions=(".noise", ".noi", ".psf"))
 
 
 def locate_ac_psf(netlists_dir: Path, stem: str = "ac_open_loop") -> SpectreAcPsfPaths:
@@ -165,3 +171,70 @@ def read_spectre_ac_from_netlists(
     """Locate and parse AC PSF under a Spectre netlist run directory."""
     paths = locate_ac_psf(netlists_dir, stem=stem)
     return read_spectre_ac_psf(paths.psf_path, signal=signal)
+
+
+def locate_noise_psf(netlists_dir: Path, stem: str = "noise_open_loop") -> SpectreAcPsfPaths:
+    """Locate PSF files for a noise run under ``output_dir/logs/netlists/``."""
+    raw_dir = find_spectre_raw_dir(netlists_dir, stem)
+    psf_path = resolve_noise_psf_path(raw_dir)
+    log_file = raw_dir / "logFile"
+    return SpectreAcPsfPaths(
+        raw_dir=raw_dir,
+        psf_path=psf_path,
+        log_file=log_file if log_file.is_file() else None,
+    )
+
+
+def _pick_noise_trace(registry, signal: str):
+    """Return the PSF trace for output noise spectral density."""
+    for cand in registry.traces:
+        if cand.name == signal:
+            return cand
+    for cand in registry.traces:
+        name = cand.name.lower()
+        if "noise" in name or name in {"out", "outn", "vout"}:
+            return cand
+    names = ", ".join(t.name for t in registry.traces)
+    msg = f"No noise trace matching '{signal}' in PSF ({names})"
+    raise SpectrePsfError(msg)
+
+
+def read_spectre_noise_psf(
+    psf_path: Path,
+    *,
+    signal: str = "out",
+) -> dict[str, NDArray[np.float64]]:
+    """Read output noise spectral density (V/√Hz) vs frequency from noise PSF."""
+    registry = _load_psf_registry(psf_path)
+    sweep = registry.sweeps[0] if registry.sweeps else None
+    if sweep is None or not sweep.data:
+        msg = f"No frequency sweep in PSF file {psf_path}"
+        raise SpectrePsfError(msg)
+    frequency_hz = np.asarray([float(np.real(z)) for z in sweep.data], dtype=np.float64)
+    trace = _pick_noise_trace(registry, signal)
+    values = np.asarray(trace.data, dtype=np.complex128)
+    if values.shape[0] != frequency_hz.shape[0]:
+        msg = (
+            f"PSF sweep length {frequency_hz.shape[0]} != trace '{trace.name}' "
+            f"length {values.shape[0]}"
+        )
+        raise SpectrePsfError(msg)
+    magnitude = np.abs(values).astype(np.float64)
+    # Spectre may store V^2/Hz; heuristically sqrt when magnitudes are squared PSD.
+    if np.nanmax(magnitude) > 1.0e-3:
+        magnitude = np.sqrt(np.maximum(magnitude, 0.0))
+    return {
+        "frequency_hz": frequency_hz,
+        "noise_v_per_sqrt_hz": magnitude,
+    }
+
+
+def read_spectre_noise_from_netlists(
+    netlists_dir: Path,
+    *,
+    stem: str = "noise_open_loop",
+    signal: str = "out",
+) -> dict[str, NDArray[np.float64]]:
+    """Locate and parse noise PSF under a Spectre netlist run directory."""
+    paths = locate_noise_psf(netlists_dir, stem=stem)
+    return read_spectre_noise_psf(paths.psf_path, signal=signal)

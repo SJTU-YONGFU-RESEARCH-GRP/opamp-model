@@ -242,6 +242,7 @@ opamp-model/
 | [docs/bench_spec.md](docs/bench_spec.md) | Bench definitions, per-engine support, outputs, netlists |
 | [docs/metrics_catalog.md](docs/metrics_catalog.md) | Metric names, units, status (`reported` / `scaffold` / `planned`) |
 | [docs/golden_metrics.yaml](docs/golden_metrics.yaml) | Optional transistor-level reference targets |
+| [docs/Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf](docs/Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf) | Flicker noise modeling reference (NEWCAS 2021) |
 | [testbench/ngspice/README.md](testbench/ngspice/README.md) | ngspice netlist notes |
 | [testbench/spectre/README.md](testbench/spectre/README.md) | Spectre deck notes |
 

@@ -7,6 +7,7 @@ Deep modeling reference for **opamp-model**.
 - [bench_spec.md](bench_spec.md) — bench definitions and outputs
 - [metrics_catalog.md](metrics_catalog.md) — metric index and status
 - [golden_metrics.yaml](golden_metrics.yaml) — optional reference targets
+- [Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf](Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf) — device flicker noise reference (NEWCAS 2021)
 
 ## Ideal small-signal VOA
 
@@ -75,12 +76,118 @@ Implementation: ``src/opamp_model/cm_ps.py``; benches ``run_ac.py`` (CMRR curve)
 Input-referred voltage noise density (white + flicker):
 
 \[
-e_n(f) = \sqrt{e_{n,\mathrm{white}}^2 + e_{n,\mathrm{flicker@1Hz}}^2 \cdot \frac{f_c}{f}}
+e_n(f) = \sqrt{e_{n,\mathrm{white}}^2 + e_{n,\mathrm{flicker}}^2(f)}
 \]
 
 Output-referred spectrum scales with open-loop magnitude: ``e_{out}(f) = e_n(f) \cdot |A_{\mathrm{ol}}(j\omega)|``.
 
 Implementation: ``src/opamp_model/noise.py``, ``src/opamp_model/noise_analysis.py``; bench ``run_noise.py``.
+
+Reference: [Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf](Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf) (Zhou et al., NEWCAS 2021).
+
+#### Flicker noise (paper-aligned)
+
+**Phase 1** replaces the legacy scale-factor pair with parameters that match the paper and Spectre ``flicker_noise(pwr, EF, "flicker")``:
+
+\[
+e_{n,\mathrm{flicker}}(f) = \frac{e_{n,\mathrm{flicker@1Hz}}}{f^{E_F/2}}
+\qquad
+e_n(f) = \sqrt{e_{n,\mathrm{white}}^2 + e_{n,\mathrm{flicker}}^2(f)}
+\]
+
+| Intended config field | Paper / Spectre | Meaning |
+| --- | --- | --- |
+| ``en_flicker_1hz_v_per_sqrt_hz`` | ``pwr`` in ``flicker_noise(pwr, EF, …)`` | Input-referred voltage density at **exactly 1 Hz** (V/√Hz) |
+| ``en_flicker_ef`` | ``EF`` | Exponent in **PSD** \(S_n(f) \propto 1/f^{E_F}\); default ``1.0`` (classic 1/f) |
+
+Classic MOS flicker PSD (paper Eq. 1):
+
+\[
+V_n^2(f) = \frac{K}{C_{ox}\,W\,L\,f}
+\qquad\Rightarrow\qquad
+e_n(f) = \sqrt{\frac{K}{C_{ox}WL}}\cdot f^{-E_F/2}
+\quad (E_F = 1)
+\]
+
+**Intended Python API (Phase 1):**
+
+```python
+from opamp_model.config import OpampNoiseConfig
+from opamp_model.noise import input_referred_en, flicker_corner_hz
+
+noise = OpampNoiseConfig(
+    en_white_v_per_sqrt_hz=5.0e-9,
+    en_flicker_1hz_v_per_sqrt_hz=50.0e-9,  # true 1 Hz level (paper pwr)
+    en_flicker_ef=1.0,
+)
+f_c = flicker_corner_hz(noise)  # reported metric flicker_corner_hz
+```
+
+CLI (intended): ``--en-flicker-1hz-nv-per-sqrt-hz``, ``--en-flicker-ef``.
+
+**Legacy alias (migration):** ``en_flicker_at_1hz_v_per_sqrt_hz`` + ``en_flicker_corner_hz`` implemented the equivalent shape via \(e_{n,\mathrm{flicker}}(f) = e_{\mathrm{coef}}\sqrt{f_c/f}\). When only legacy fields are set, engines derive ``en_flicker_1hz = en_flicker_at_1hz × √en_flicker_corner_hz``.
+
+#### Flicker corner definition
+
+Per the paper (ref. [23] in the PDF), the **flicker corner frequency** \(f_{\mathrm{corner}}\) is the frequency where thermal and flicker noise **equally contribute to the PSD** (not a free scale factor):
+
+\[
+e_{n,\mathrm{white}}^2 = \frac{e_{n,\mathrm{flicker@1Hz}}^2}{f_{\mathrm{corner}}^{E_F}}
+\qquad\Rightarrow\qquad
+f_{\mathrm{corner}} = \left(\frac{e_{n,\mathrm{flicker@1Hz}}}{e_{n,\mathrm{white}}}\right)^{2/E_F}
+\]
+
+| Quantity | Role |
+| --- | --- |
+| ``flicker_corner_hz`` | **Reported** scalar from config (``status: reported``, source ``flicker_corner``) |
+| ``en_flicker_corner_hz`` | **Legacy param** — retained as alias; prefer computed ``flicker_corner_hz`` in new reports |
+
+Default example: ``en_white = 5 nV/√Hz``, ``en_flicker_1hz = 50 nV/√Hz``, ``EF = 1`` → ``flicker_corner_hz = 100 Hz``.
+
+#### Coram KF / AF (Phase 2)
+
+The paper’s Verilog-AMS amplifier and switch models use the Coram-corrected compact flicker formulation (ref. [14]):
+
+```verilog
+Ir = V(vip, vin) / R;
+Pn = KF * pow(abs(Ir), AF);
+I(vip, vin) <+ flicker_noise(sign(Ir)*Pn, EF, "flicker");
+```
+
+| Intended config field | Paper | Role |
+| --- | --- | --- |
+| ``kf`` | ``KF`` | Flicker strength constant |
+| ``af`` | ``AF`` | Current exponent in ``Pn = KF·|I|^AF`` |
+| ``bias_current_a`` | ``Ir`` | Bias current for bias-dependent ``en_flicker_1hz`` |
+
+When ``kf > 0``, ``en_flicker_1hz_v_per_sqrt_hz`` is **derived** from bias rather than taken from the table:
+
+```python
+# Intended helper (opamp_model.noise)
+def en_flicker_1hz_from_kf(kf: float, af: float, bias_current_a: float) -> float:
+    """Map Coram Pn at 1 Hz to input-referred V/√Hz (device-specific calibration)."""
+```
+
+Fixed ``en_flicker_1hz`` overrides ``kf``/``af`` when explicitly set (documented precedence).
+
+#### Verilog-A ``flicker_noise`` (Phase 3)
+
+``configurable_opamp.va`` gains native noise sources aligned with Fig. 2 of the paper:
+
+```verilog
+I(inp, inn) <+ white_noise(4.0*`P_K*$temperature/RIN_OHM, "thermal");
+I(inp, inn) <+ flicker_noise(EN_FLICKER_PWR_1HZ, EN_FLICKER_EF, "flicker");
+```
+
+| VA parameter | Maps to |
+| --- | --- |
+| ``EN_FLICKER_PWR_1HZ`` | ``OpampNoiseConfig.en_flicker_1hz_v_per_sqrt_hz`` |
+| ``EN_FLICKER_EF`` | ``OpampNoiseConfig.en_flicker_ef`` |
+
+Spectre ``noise_open_loop.scs`` and ngspice decks pass these at render time. Engine merge rules:
+
+- **spectre:** read white + flicker from PSF ``.noise`` when VA sources are active; skip Python flicker post-merge.
+- **ngspice:** thermal from ``RN``; flicker from VA when the deck includes ``flicker_noise``; else config merge (today).
 
 ### Large-signal (Python TRAN)
 
@@ -111,13 +218,23 @@ All engines must implement the **same** equations in this document; none is auth
 
 | Bench | Python | ngspice | Spectre |
 | --- | --- | --- | --- |
-| AC open-loop | Macromodel | ``ac_open_loop.cir``: ideal VCVS + RC with ``Rlp·Clp=1/wp`` (one-pole, same as ``laplace_nd``); ``wrdata`` parsed | ``ac_open_loop.scs`` runs; Bode from Python until PSF parser |
-| STB loop gain | ``beta * A_open`` | ``stb_loop.cir`` (same one-pole macromodel); ``loop_beta`` applied in ``run_stb.py`` | Same as AC (Python Bode today) |
-| Noise | Macromodel spectrum | ``noise_stub.cir`` runs; spectrum from Python | ``noise_stub.scs`` runs; spectrum from Python |
+| AC open-loop | Macromodel | ``ac_open_loop.cir``: ideal VCVS + RC with ``Rlp·Clp=1/wp`` (one-pole, same as ``laplace_nd``); ``wrdata`` parsed | ``ac_open_loop.scs`` → PSF ``*.raw/ac.ac`` via ``spectre_psf.py`` |
+| STB loop gain | ``beta * A_open`` | ``stb_loop.cir`` (same one-pole macromodel); ``loop_beta`` applied in ``run_stb.py`` | Same AC PSF path; ``loop_beta`` in ``run_stb.py`` |
+| Noise | Macromodel spectrum | ``noise_open_loop.cir`` (``.noise`` + AC); VA flicker when enabled | ``noise_open_loop.scs`` (``.noise`` + PSF); VA ``flicker_noise`` when enabled |
 | PSRR | Macromodel | Python only (``psrr.scs`` stub) | Python only (``psrr.scs`` stub) |
 | Slew / THD | TRAN macromodel | Not wired | Not wired |
 
-**Scaffolding (temporary):** ngspice/Spectre noise still substitute Python spectra after the netlist run. Spectre AC/STB read Bode data from PSF (``src/opamp_model/spectre_psf.py``); do not treat Python as golden for Spectre AC metrics.
+**Scaffolding (temporary):** Some benches may still fall back to Python when PSF or ngspice artifacts are missing; see engine code. Spectre AC/STB read Bode from PSF when available (``src/opamp_model/spectre_psf.py``).
+
+### Noise engine limitations
+
+| Engine | Netlist | Spectrum source | Limitation |
+| --- | --- | --- | --- |
+| **python** | — | ``noise.py`` × ``|A_open(f)|`` | Macromodel for ``--simulator python`` only |
+| **ngspice** | ``testbench/ngspice/noise_open_loop.cir`` | ngspice AC gain × ``input_referred_en`` (config) | Ideal VCVS (``E``) does not amplify resistor noise in ``.noise``; thermal ``Rn`` runs; flicker from ``OpampNoiseConfig`` |
+| **spectre** | ``testbench/spectre/noise_open_loop.scs`` | Output noise PSF + VA ``flicker_noise`` (Phase 3) | White via ``RN`` + ``white_noise``; flicker native in VA when ``EN_FLICKER_PWR_1HZ > 0`` |
+
+Until Phase 3 is complete, engines may still merge flicker from ``OpampNoiseConfig`` after PSF read. Do not use the Python noise bench as a golden reference for ngspice/Spectre until VA flicker and controlled-source noise transfer are both active in netlists.
 
 ``docs/golden_metrics.yaml`` holds optional transistor-level reference targets for future ``compare_engines.py``; it is **not** an engine truth file.
 
@@ -129,7 +246,7 @@ All engines must implement the **same** equations in this document; none is auth
 | TIA | [../veriloga/configurable_tia.va](../veriloga/configurable_tia.va) | Parameter shell (no closed-loop yet) |
 | Gm / OTA | [../veriloga/configurable_gm.va](../veriloga/configurable_gm.va) | Parameter shell |
 
-CMRR and PSRR are in Verilog-A (``CMRR_DB``, ``PSRR_DB``, ``PSRR_POLE_HZ``); noise, slew, and weak nonlinearity remain Python-only today.
+CMRR and PSRR are in Verilog-A (``CMRR_DB``, ``PSRR_DB``, ``PSRR_POLE_HZ``). ``white_noise`` / ``flicker_noise`` on ``inp, inn`` (paper Fig. 2). Slew and weak nonlinearity remain Python TRAN macromodels.
 
 ## Python package
 
@@ -149,15 +266,21 @@ CMRR and PSRR are in Verilog-A (``CMRR_DB``, ``PSRR_DB``, ``PSRR_POLE_HZ``); noi
 ```python
 from opamp_model import OpampConfig, OpampNoiseConfig, simulate_ac, simulate_stb
 from opamp_model import simulate_cmrr, simulate_psrr, simulate_noise
+from opamp_model.noise import flicker_corner_frequency
 
 cfg = OpampConfig(a0_db=80.0, gbw_hz=10e6)
-noise = OpampNoiseConfig()
+noise = OpampNoiseConfig(
+    en_flicker_1hz_v_per_sqrt_hz=50.0e-9,
+    en_flicker_ef=1.0,
+    kf=0.0,  # set kf/af/bias_current_a to derive en_flicker_1hz from bias
+)
 
 ac = simulate_ac(cfg, noise)
 stb = simulate_stb(cfg, noise)
 cmrr = simulate_cmrr(cfg)
 psrr = simulate_psrr(cfg)
 n = simulate_noise(cfg, noise)
+f_c = flicker_corner_frequency(noise)
 ```
 
 Default frequency sweep: ``BenchSweepConfig`` — 1 Hz–100 MHz, 10 points/decade (see [bench_spec.md](bench_spec.md)).

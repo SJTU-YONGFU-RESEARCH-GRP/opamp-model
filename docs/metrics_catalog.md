@@ -10,7 +10,7 @@ Target figures of merit for **opamp-model**, mapped to benches and implementatio
 | **param** | Taken from macromodel parameters (not a separate simulation) |
 | **ideal** | Disabled by `--ideal` or zero nonlinearity/noise |
 | **planned** | Bench or model path documented here; not wired yet |
-| **scaffold** | Netlist runs but curves/metrics still from Python (ngspice noise, Spectre AC/noise) |
+| **scaffold** | Netlist runs but curves/metrics still from Python (e.g. Spectre AC when PSF missing) |
 
 ## Small-signal / AC / STB
 
@@ -46,14 +46,22 @@ PSRR uses the Python macromodel for all engines until supply AC is modeled in Ve
 
 ## Noise
 
+Paper reference: [Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf](Flicker_Noise_Analysis_on_Chopper_Amplifier.pdf).
+
 | Metric | Unit | Bench | Status |
 | --- | --- | --- | --- |
 | `en_white_v_per_sqrt_hz` | V/√Hz | Noise | **param** (or **ideal** with `--ideal`) |
-| `en_flicker_corner_hz` | Hz | Noise | **param** |
-| `en_in_spot_1khz_v_per_sqrt_hz` | V/√Hz | Noise | **reported** (python); **scaffold** (ngspice/spectre) |
-| `en_out_spot_1khz_v_per_sqrt_hz` | V/√Hz | Noise | **reported** / **scaffold** |
-| `integrated_noise_rms_v` | V | Noise | **reported** / **scaffold** |
-| Flicker @ 1 Hz | V/√Hz | Noise | **param** (`en_flicker_at_1hz_v_per_sqrt_hz`) |
+| `en_flicker_1hz_v_per_sqrt_hz` | V/√Hz | Noise | **param** — true density at 1 Hz (paper `pwr` / Spectre `flicker_noise`) |
+| `en_flicker_ef` | — | Noise | **param** — PSD exponent `EF` (default `1.0`) |
+| `flicker_corner_hz` | Hz | Noise | **reported** — white/flicker PSD intersection (paper definition) |
+| `en_flicker_corner_hz` | Hz | Noise | **param** — **legacy alias**; prefer `flicker_corner_hz` |
+| `en_flicker_at_1hz_v_per_sqrt_hz` | V/√Hz | Noise | **param** — **legacy** scale-factor form; maps to `en_flicker_1hz` |
+| `kf` | — | Noise | **param** (Phase 2) — Coram `KF` in `Pn = KF·\|I\|^AF` |
+| `af` | — | Noise | **param** (Phase 2) — Coram `AF` exponent |
+| `bias_current_a` | A | Noise | **param** (Phase 2) — bias current for KF/AF-derived `en_flicker_1hz` |
+| `en_in_spot_1khz_v_per_sqrt_hz` | V/√Hz | Noise | **reported** (`noise_macromodel` / `ngspice_noise` / `spectre_noise`) |
+| `en_out_spot_1khz_v_per_sqrt_hz` | V/√Hz | Noise | **reported** |
+| `integrated_noise_rms_v` | V | Noise | **reported** |
 
 ## Large-signal / distortion
 

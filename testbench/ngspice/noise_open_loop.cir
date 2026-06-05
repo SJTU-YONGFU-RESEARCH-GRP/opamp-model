@@ -1,0 +1,47 @@
+* Open-loop output noise — ngspice .noise + AC (one-pole macromodel, same as ac_open_loop.cir).
+*
+* White input noise: thermal resistor Rn (en_white). Flicker is merged in the Python
+* engine (noise.flicker_voltage_density) because ngspice does not support flicker_noise()
+* in Verilog-A and .noise does not propagate noise through ideal VCVS (E) sources.
+*
+* Run via: python scripts/run_noise.py --simulator ngspice --output-dir outputs/ngspice
+
+.param a0_db=80
+.param gbw_hz=10Meg
+.param rin_ohm=1e12
+.param rout_ohm=100
+.param en_white=5e-9
+.param kT=4.142e-21
+.param rn_white=PLACEHOLDER_RN
+.param a0_linear=PLACEHOLDER_A0
+.param wp_rad_s=PLACEHOLDER_WP
+.param rlp_ohm=PLACEHOLDER_RLP
+.param clp_f=PLACEHOLDER_CLP
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+VCM inn 0 DC 0.9
+Rinn inn 0 {rin_ohm}
+Rinp inp 0 {rin_ohm}
+Rn inp inn {rn_white}
+VAC inp 0 DC 0.9 AC 1
+
+Eaux n1 0 inp inn {a0_linear}
+Rlp n1 n2 {rlp_ohm}
+Clp n2 0 {clp_f}
+Eout out 0 n2 0 1
+ROUT out 0 {rout_ohm}
+
+.ac dec PLACEHOLDER_DEC PLACEHOLDER_FSTART PLACEHOLDER_FSTOP
+.noise V(out) VAC dec PLACEHOLDER_DEC PLACEHOLDER_FSTART PLACEHOLDER_FSTOP
+.control
+run
+setplot noise1
+set wr_singlescale
+wrdata noise_spectrum.raw frequency onoise_spectrum inoise_spectrum
+setplot ac1
+set wr_singlescale
+wrdata noise_ac.raw frequency vdb(out) vp(out)
+.endc
+
+.end

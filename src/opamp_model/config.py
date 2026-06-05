@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+_UNSET: object = object()
+
 
 @dataclass(frozen=True)
 class BenchSweepConfig:
@@ -71,21 +73,106 @@ class OpampNoiseConfig:
     """Input- and output-referred noise parameters."""
 
     en_white_v_per_sqrt_hz: float = 5.0e-9
-    en_flicker_corner_hz: float = 100.0
-    en_flicker_at_1hz_v_per_sqrt_hz: float = 50.0e-9
+    en_flicker_1hz_v_per_sqrt_hz: float = 50.0e-9
+    en_flicker_ef: float = 1.0
+    kf: float = 0.0
+    af: float = 1.0
+    bias_current_a: float = 0.0
     in_white_a_per_sqrt_hz: float = 0.0
-    in_flicker_corner_hz: float = 100.0
-    in_flicker_at_1hz_a_per_sqrt_hz: float = 0.0
+    in_flicker_1hz_a_per_sqrt_hz: float = 0.0
     noise_seed: int = 1
+
+    def __init__(
+        self,
+        *,
+        en_white_v_per_sqrt_hz: float = 5.0e-9,
+        en_flicker_1hz_v_per_sqrt_hz: float | object = _UNSET,
+        en_flicker_ef: float = 1.0,
+        kf: float = 0.0,
+        af: float = 1.0,
+        bias_current_a: float = 0.0,
+        in_white_a_per_sqrt_hz: float = 0.0,
+        in_flicker_1hz_a_per_sqrt_hz: float | object = _UNSET,
+        noise_seed: int = 1,
+        en_flicker_at_1hz_v_per_sqrt_hz: float | object = _UNSET,
+        en_flicker_corner_hz: float | object = _UNSET,
+        in_flicker_at_1hz_a_per_sqrt_hz: float | object = _UNSET,
+        in_flicker_corner_hz: float | object = _UNSET,
+    ) -> None:
+        """Build noise config; legacy flicker kwargs preserve prior spectra."""
+        ef = float(en_flicker_ef)
+        if en_flicker_1hz_v_per_sqrt_hz is not _UNSET:
+            en_1hz = float(en_flicker_1hz_v_per_sqrt_hz)
+        elif en_flicker_at_1hz_v_per_sqrt_hz is not _UNSET:
+            at_1hz = float(en_flicker_at_1hz_v_per_sqrt_hz)
+            corner = (
+                100.0
+                if en_flicker_corner_hz is _UNSET
+                else float(en_flicker_corner_hz)
+            )
+            en_1hz = at_1hz * corner ** (ef / 2.0)
+        elif en_flicker_corner_hz is not _UNSET:
+            corner = float(en_flicker_corner_hz)
+            en_1hz = en_white_v_per_sqrt_hz * corner ** (ef / 2.0)
+        else:
+            en_1hz = 50.0e-9
+
+        if in_flicker_1hz_a_per_sqrt_hz is not _UNSET:
+            in_1hz = float(in_flicker_1hz_a_per_sqrt_hz)
+        elif in_flicker_at_1hz_a_per_sqrt_hz is not _UNSET:
+            at_1hz = float(in_flicker_at_1hz_a_per_sqrt_hz)
+            corner = (
+                100.0
+                if in_flicker_corner_hz is _UNSET
+                else float(in_flicker_corner_hz)
+            )
+            in_1hz = at_1hz * corner ** (ef / 2.0)
+        else:
+            in_1hz = 0.0
+
+        object.__setattr__(self, "en_white_v_per_sqrt_hz", en_white_v_per_sqrt_hz)
+        object.__setattr__(self, "en_flicker_1hz_v_per_sqrt_hz", en_1hz)
+        object.__setattr__(self, "en_flicker_ef", ef)
+        object.__setattr__(self, "kf", kf)
+        object.__setattr__(self, "af", af)
+        object.__setattr__(self, "bias_current_a", bias_current_a)
+        object.__setattr__(self, "in_white_a_per_sqrt_hz", in_white_a_per_sqrt_hz)
+        object.__setattr__(self, "in_flicker_1hz_a_per_sqrt_hz", in_1hz)
+        object.__setattr__(self, "noise_seed", noise_seed)
+
+    @property
+    def en_flicker_at_1hz_v_per_sqrt_hz(self) -> float:
+        """Deprecated alias for ``en_flicker_1hz_v_per_sqrt_hz``."""
+        return self.en_flicker_1hz_v_per_sqrt_hz
+
+    @property
+    def en_flicker_corner_hz(self) -> float:
+        """Flicker corner (Hz) where white and flicker densities intersect."""
+        from opamp_model.noise import flicker_corner_frequency
+
+        return flicker_corner_frequency(self)
+
+    @property
+    def in_flicker_at_1hz_a_per_sqrt_hz(self) -> float:
+        """Deprecated alias for ``in_flicker_1hz_a_per_sqrt_hz``."""
+        return self.in_flicker_1hz_a_per_sqrt_hz
+
+    @property
+    def in_flicker_corner_hz(self) -> float:
+        """Input-current flicker corner (Hz)."""
+        from opamp_model.noise import in_flicker_corner_frequency
+
+        return in_flicker_corner_frequency(self)
 
     @property
     def enabled(self) -> bool:
         """Return True when any noise mechanism is active."""
         return (
             self.en_white_v_per_sqrt_hz > 0.0
-            or self.en_flicker_at_1hz_v_per_sqrt_hz > 0.0
+            or self.en_flicker_1hz_v_per_sqrt_hz > 0.0
+            or self.kf > 0.0
             or self.in_white_a_per_sqrt_hz > 0.0
-            or self.in_flicker_at_1hz_a_per_sqrt_hz > 0.0
+            or self.in_flicker_1hz_a_per_sqrt_hz > 0.0
         )
 
 

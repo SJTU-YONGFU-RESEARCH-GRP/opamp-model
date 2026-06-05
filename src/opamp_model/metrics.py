@@ -11,6 +11,7 @@ import numpy as np
 from opamp_model.ac import AcCompMetrics, AcMetrics
 from opamp_model.cm_ps import CmrrSimulationResult, PsrrSimulationResult
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.noise import flicker_corner_frequency, flicker_voltage_density
 from opamp_model.impedance import zin_diff, zout as zout_model
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
 from opamp_model.tia import TiaMetrics, TiaSimulationResult
@@ -164,14 +165,31 @@ def build_cmrr_psrr_entries(
     }
 
 
+def _noise_metric_source(engine: str) -> str:
+    """Return provenance label for simulated noise metrics."""
+    if engine == "python":
+        return "noise_macromodel"
+    if engine == "ngspice":
+        return "ngspice_noise"
+    if engine == "spectre":
+        return "spectre_noise"
+    return "run_noise.py"
+
+
 def build_noise_entries(
     cfg: OpampConfig,
     noise: OpampNoiseConfig,
     *,
+    engine: str = "python",
     noise_result: NoiseSimulationResult | None = None,
 ) -> dict[str, MetricEntry]:
     """Noise scalars from config and optional ``run_noise.py`` simulation."""
     _ = cfg
+    sim_source = _noise_metric_source(engine)
+    corner_hz = flicker_corner_frequency(noise)
+    en_flicker_1hz = float(
+        flicker_voltage_density(np.array([1.0]), noise)[0]
+    )
     entries: dict[str, MetricEntry] = {
         "en_white_v_per_sqrt_hz": _metric(
             noise.en_white_v_per_sqrt_hz,
@@ -179,10 +197,16 @@ def build_noise_entries(
             status="param" if noise.enabled else "ideal",
             source="OpampNoiseConfig",
         ),
+        "en_flicker_1hz_v_per_sqrt_hz": _metric(
+            en_flicker_1hz if en_flicker_1hz > 0.0 else None,
+            unit="V/sqrt(Hz)",
+            status="param" if noise.enabled else "ideal",
+            source="OpampNoiseConfig",
+        ),
         "en_flicker_corner_hz": _metric(
-            noise.en_flicker_corner_hz,
+            corner_hz,
             unit="Hz",
-            status="param",
+            status="param" if noise.enabled and np.isfinite(corner_hz) else "ideal",
             source="OpampNoiseConfig",
         ),
     }
@@ -191,7 +215,7 @@ def build_noise_entries(
             None,
             unit="V",
             status="planned",
-            source="run_noise.py",
+            source=sim_source,
         )
         return entries
     metrics = noise_result["metrics"]
@@ -199,19 +223,19 @@ def build_noise_entries(
         metrics["en_in_spot_1khz_v_per_sqrt_hz"],
         unit="V/sqrt(Hz)",
         status="reported",
-        source="run_noise.py",
+        source=sim_source,
     )
     entries["en_out_spot_1khz_v_per_sqrt_hz"] = _metric(
         metrics["en_out_spot_1khz_v_per_sqrt_hz"],
         unit="V/sqrt(Hz)",
         status="reported",
-        source="run_noise.py",
+        source=sim_source,
     )
     entries["integrated_noise_rms_v"] = _metric(
         metrics["integrated_noise_rms_v"],
         unit="V",
         status="reported",
-        source="run_noise.py",
+        source=sim_source,
     )
     return entries
 
@@ -340,7 +364,12 @@ def build_metrics_report(
             cmrr_result=cmrr_result,
             psrr_result=psrr_result,
         ),
-        noise=build_noise_entries(cfg, noise, noise_result=noise_result),
+        noise=build_noise_entries(
+            cfg,
+            noise,
+            engine=engine,
+            noise_result=noise_result,
+        ),
         large_signal=build_large_signal_entries(
             cfg,
             thd=thd,

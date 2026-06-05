@@ -11,6 +11,7 @@ import numpy as np
 from opamp_model.cli_helpers import resolve_engine_label
 from opamp_model.config import OpampConfig, OpampNoiseConfig, TiaConfig
 from opamp_model.metrics import MetricEntry, OpampMetricsReport, format_metrics_table
+from opamp_model.noise_analysis import NoiseBreakdown
 from opamp_model.tran import ThdMetrics
 
 
@@ -244,6 +245,20 @@ def write_psrr_report(
     return path
 
 
+def _noise_config_summary(noise: OpampNoiseConfig) -> str:
+    """Summarize enabled noise parameters for Markdown reports."""
+    if not noise.enabled:
+        return "Noise disabled (`--ideal` or zero density parameters)."
+    corner = noise.en_flicker_corner_hz
+    corner_str = f"{corner:.4g} Hz" if np.isfinite(corner) and corner > 0.0 else "—"
+    return (
+        f"White input density: **{noise.en_white_v_per_sqrt_hz * 1.0e9:.4g} nV/√Hz**; "
+        f"flicker @ 1 Hz: **{noise.en_flicker_1hz_v_per_sqrt_hz * 1.0e9:.4g} nV/√Hz** "
+        f"(ef={noise.en_flicker_ef:g}); flicker corner: **{corner_str}**; "
+        f"seed={noise.noise_seed}."
+    )
+
+
 def write_thd_report(
     output_dir: Path,
     *,
@@ -256,6 +271,7 @@ def write_thd_report(
     thd: ThdMetrics | None,
     freq_hz: float,
     amplitude_v: float,
+    noise_rms_v: float | None = None,
 ) -> Path:
     """Write ``THD_REPORT.md`` with waveform, spectrum, and distortion metrics."""
     path = output_dir / "THD_REPORT.md"
@@ -276,6 +292,19 @@ def write_thd_report(
     lines.extend(
         [
         _config_table(cfg),
+        "## Transient noise",
+        "",
+        _noise_config_summary(noise),
+        ]
+    )
+    if noise_rms_v is not None and np.isfinite(noise_rms_v) and noise_rms_v > 0.0:
+        lines.append(
+            f"Input-referred transient noise RMS over the simulated window: "
+            f"**{noise_rms_v:.4g} V** (dashed traces show the noise-free response)."
+        )
+    lines.extend(
+        [
+        "",
         "## Figures",
         "",
         _figure_block(waveform_svg.name, "Output voltage vs time (sine steady state)"),
@@ -323,6 +352,9 @@ def write_slew_report(
     cfg: OpampConfig,
     report: OpampMetricsReport,
     slew_svg: Path,
+    noise: OpampNoiseConfig | None = None,
+    noise_rms_v: float | None = None,
+    noise_trace_svg: Path | None = None,
 ) -> Path:
     """Write ``SLEW_REPORT.md`` with step-response plot and slew metrics."""
     path = output_dir / "SLEW_REPORT.md"
@@ -342,9 +374,34 @@ def write_slew_report(
     lines.extend(
         [
         _config_table(cfg),
+        ]
+    )
+    if noise is not None:
+        lines.extend(
+            [
+                "## Transient noise",
+                "",
+                _noise_config_summary(noise),
+            ]
+        )
+        if noise_rms_v is not None and np.isfinite(noise_rms_v) and noise_rms_v > 0.0:
+            lines.append(
+                f"Input-referred noise RMS on the step window: **{noise_rms_v:.4g} V**. "
+                "Dashed curves show the noise-free step; solid curves include noise "
+                "(clipped to the output swing)."
+            )
+        lines.append("")
+    lines.extend(
+        [
         "## Figures",
         "",
         _figure_block(slew_svg.name, "Unity-gain step response (SR+ / SR−)"),
+        ]
+    )
+    if noise_trace_svg is not None and noise_trace_svg.is_file():
+        lines.append(_figure_block(noise_trace_svg.name, "Input-referred noise samples"))
+    lines.extend(
+        [
         "",
         "## Metrics",
         "",
@@ -355,6 +412,12 @@ def write_slew_report(
         "| File | Description |",
         "| --- | --- |",
         f"| `{slew_svg.name}` | Step response plot (SVG) |",
+        ]
+    )
+    if noise_trace_svg is not None and noise_trace_svg.is_file():
+        lines.append(f"| `{noise_trace_svg.name}` | Transient noise trace (SVG) |")
+    lines.extend(
+        [
         "| `slew_step.csv` | Time, Vout (positive step), Vout (negative step) |",
         "| `opamp_metrics.json` | Scalar metrics bundle |",
         "",
@@ -485,6 +548,8 @@ def write_noise_report(
     noise: OpampNoiseConfig,
     report: OpampMetricsReport,
     spectrum_svg: Path,
+    breakdown_svg: Path | None = None,
+    breakdown: NoiseBreakdown | None = None,
 ) -> Path:
     """Write ``NOISE_REPORT.md`` with noise spectrum figure and metrics."""
     path = output_dir / "NOISE_REPORT.md"
@@ -498,9 +563,38 @@ def write_noise_report(
         f"- **Analysis band:** {cfg.sweep.f_start_hz:.6g} Hz – {cfg.sweep.f_stop_hz:.6g} Hz",
         "",
         _config_table(cfg),
+        "## Noise model",
+        "",
+        _noise_config_summary(noise),
+        "",
+    ]
+    if breakdown is not None and noise.enabled:
+        corner = breakdown["flicker_corner_hz"]
+        corner_str = f"{corner:.4g} Hz" if np.isfinite(corner) and corner > 0.0 else "—"
+        lines.extend(
+            [
+                "The breakdown plot separates **white** and **flicker** contributions at the "
+                "input and output. Total density follows RSS combination; the vertical marker "
+                f"shows the flicker corner (**{corner_str}**) where white and flicker intersect.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
         "## Figures",
         "",
         _figure_block(spectrum_svg.name, "Output-referred noise spectrum"),
+        ]
+    )
+    if breakdown_svg is not None and breakdown_svg.is_file():
+        lines.append(
+            _figure_block(
+                breakdown_svg.name,
+                "White / flicker / total noise density (input and output)",
+            )
+        )
+    lines.extend(
+        [
         "",
         "## Metrics",
         "",
@@ -511,10 +605,18 @@ def write_noise_report(
         "| File | Description |",
         "| --- | --- |",
         f"| `{spectrum_svg.name}` | Noise spectrum plot (SVG) |",
+        ]
+    )
+    if breakdown_svg is not None:
+        lines.append(f"| `{breakdown_svg.name}` | White/flicker breakdown plot (SVG) |")
+        lines.append("| `noise_breakdown.csv` | Per-frequency white/flicker/total densities |")
+    lines.extend(
+        [
         "| `noise_spectrum.csv` | Frequency, output noise density (V/√Hz) |",
         "| `opamp_metrics.json` | Scalar metrics bundle |",
         "",
-    ]
+        ]
+    )
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
@@ -626,7 +728,9 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         ("stb_bode.svg", "Loop-gain Bode"),
         ("psrr.svg", "PSRR"),
         ("noise_spectrum.svg", "Output noise spectrum"),
+        ("noise_breakdown.svg", "Noise white/flicker breakdown"),
         ("slew.svg", "Step response / slew"),
+        ("slew_noise.svg", "Transient noise on step bench"),
         ("thd_waveform.svg", "THD sine waveform"),
         ("thd_spectrum.svg", "THD harmonic spectrum"),
         ("tia_zt.svg", "TIA transimpedance"),
@@ -662,6 +766,7 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
             "| `cmrr.csv` | ACM / CMRR data |",
             "| `psrr.csv` | PSRR data |",
             "| `noise_spectrum.csv` | Noise spectrum data |",
+            "| `noise_breakdown.csv` | White/flicker breakdown data |",
             "| `slew_step.csv` | TRAN step data |",
             "| `thd_waveform.csv` | THD sine waveform |",
             "| `tia_zt.csv` | TIA transimpedance data |",

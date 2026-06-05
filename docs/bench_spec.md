@@ -27,7 +27,7 @@ Spectre netlists receive ``f_start``, ``f_stop``, ``dec`` from ``OpampConfig`` a
 | --- | --- | --- | --- | --- |
 | AC open-loop | `run_ac.py` | Full | ``ac_open_loop.cir`` + ``wrdata`` | Netlist + Python Bode (PSF TBD) |
 | STB loop gain | `run_stb.py` | Full | AC netlist + ``loop_beta`` in Python | Netlist + Python Bode (PSF TBD) |
-| Noise | `run_noise.py` | Full | Stub + Python spectrum | Stub + Python spectrum |
+| Noise | `run_noise.py` | Full | ``noise_open_loop.cir`` + parser | ``noise_open_loop.scs`` + PSF parser |
 | PSRR | `run_psrr.py` | Full | Python macromodel | Python macromodel |
 | Slew rate | `run_slew.py` | Full | — | — |
 | THD | `run_thd.py` | Full | — | — |
@@ -81,7 +81,11 @@ Historical Cadence extraction (documentation only):
 
 **Artifacts:** ``noise_spectrum.csv``, ``noise_spectrum.svg``, ``NOISE_REPORT.md``.
 
-**Netlists (stub):** ``testbench/ngspice/noise_stub.cir``, ``testbench/spectre/noise_stub.scs``.
+**Netlists:** ``testbench/ngspice/noise_open_loop.cir``, ``testbench/spectre/noise_open_loop.scs``.
+
+ngspice exports ``noise_spectrum.raw`` (``onoise_spectrum``, ``inoise_spectrum``) and ``noise_ac.raw`` (Bode). Spectre writes ``noise_open_loop.raw/`` PSF for the ``noise`` analysis. See [MODEL.md](MODEL.md#noise-engine-limitations) for parser limitations (VCVS noise path, flicker merge).
+
+Metrics: ``en_flicker_1hz_v_per_sqrt_hz``, ``en_flicker_ef``, computed ``flicker_corner_hz``, optional ``kf``/``af``. CLI: ``--en-flicker-1hz-nv-per-sqrt-hz``, ``--en-flicker-ef``, ``--kf``, ``--af``, ``--bias-current-a``.
 
 ### PSRR (`run_psrr.py`)
 
@@ -152,7 +156,7 @@ Each engine directory ``outputs/<engine>/`` accumulates:
 | File | Content |
 | --- | --- |
 | `opamp_metrics.json` | Scalar metrics by section (merged across benches) |
-| `AC_REPORT.md`, `STB_REPORT.md`, … | Per-bench Markdown + embedded SVG |
+| `AC_REPORT.md`, `STB_REPORT.md`, `CHOPPER_NOISE_REPORT.md`, … | Per-bench Markdown + embedded SVG |
 | `REPORT.md` | Index of bench reports and figures |
 | `logs/` | Simulation logs, rendered netlists, Verilog-A copies |
 

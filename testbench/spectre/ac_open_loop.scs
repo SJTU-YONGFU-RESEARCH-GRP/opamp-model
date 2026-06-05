@@ -30,5 +30,5 @@ XOP (inp inn out vdd vss) configurable_opamp \
     A0_DB=a0_db GBW_HZ=gbw_hz CMRR_DB=cmrr_db PSRR_DB=psrr_db \
     PSRR_POLE_HZ=psrr_pole_hz RIN_OHM=rin_ohm CIN_F=cin_f ROUT_OHM=rout_ohm COUT_F=cout_f
 
-save v
+save out
 ac ac start=f_start stop=f_stop dec=dec annotate=status

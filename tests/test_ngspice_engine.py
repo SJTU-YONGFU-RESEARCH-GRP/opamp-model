@@ -6,13 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from opamp_model.config import OpampConfig, OpampNoiseConfig
-from opamp_model.model import simulate_ac, simulate_noise
+from opamp_model.config import OpampConfig
+from opamp_model.model import simulate_ac
 from opamp_model.ngspice_engine import (
     NgspiceNotFoundError,
     find_ngspice_executable,
     simulate_ac_ngspice,
-    simulate_noise_ngspice,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -48,17 +47,3 @@ def test_ngspice_ac_matches_python(tmp_path: Path) -> None:
         abs=2.0,
     )
 
-
-def test_ngspice_noise_stub_runs(tmp_path: Path) -> None:
-    """ngspice noise stub netlist completes; metrics match Python golden."""
-    cfg = OpampConfig()
-    noise = OpampNoiseConfig()
-    py = simulate_noise(cfg, noise)
-    try:
-        ng = simulate_noise_ngspice(cfg, tmp_path, noise)
-    except NgspiceNotFoundError:
-        pytest.skip("ngspice not available")
-    assert ng["metrics"]["integrated_noise_rms_v"] == pytest.approx(
-        py["metrics"]["integrated_noise_rms_v"],
-        rel=0.01,
-    )

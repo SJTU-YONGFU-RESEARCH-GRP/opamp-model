@@ -3,13 +3,16 @@
 // Open-loop: H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ/A0_LINEAR
 // CMRR: ACM(s) = Aol(s) / CMRR_LINEAR  (common-mode path)
 // PSRR: H_ps(s) = (1/PSRR_LINEAR) / (1 + s/wp_psrr)  (VDD feedthrough)
+// Noise: white_noise + flicker_noise on inp-inn (paper Fig. 2 pattern)
 
 `include "constants.vams"
 `include "disciplines.vams"
 
 (* compact_module *)
 (* instance_parameter_list = {A0_DB, GBW_HZ, CMRR_DB, PSRR_DB, PSRR_POLE_HZ,
-    RIN_OHM, CIN_F, ROUT_OHM, COUT_F} *)
+    RIN_OHM, CIN_F, ROUT_OHM, COUT_F, EN_WHITE_V_PER_SQRT_HZ,
+    EN_FLICKER_1HZ_V_PER_SQRT_HZ, EN_FLICKER_EF, KF, AF, BIAS_CURRENT_A,
+    ENABLE_NOISE} *)
 module configurable_opamp(inp, inn, out, vdd, vss);
 
     input inp, inn, vdd, vss;
@@ -28,6 +31,13 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     parameter real CIN_F = 1.0e-12;
     parameter real ROUT_OHM = 100.0;
     parameter real COUT_F = 2.0e-12;
+    parameter real EN_WHITE_V_PER_SQRT_HZ = 0.0;
+    parameter real EN_FLICKER_1HZ_V_PER_SQRT_HZ = 0.0;
+    parameter real EN_FLICKER_EF = 1.0;
+    parameter real KF = 0.0;
+    parameter real AF = 1.0;
+    parameter real BIAS_CURRENT_A = 1.0e-6;
+    parameter real ENABLE_NOISE = 0.0;
 
     real a0_linear;
     real cmrr_linear;
@@ -36,6 +46,9 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     real wp_psrr;
     real vd;
     real vcm;
+    real rn_noise;
+    real pn_flicker;
+    real ir_bias;
     // Spectre laplace_nd requires array variables (not inline parameter expressions).
     real numer[0:1];
     real denom[0:1];
@@ -93,6 +106,34 @@ module configurable_opamp(inp, inn, out, vdd, vss);
             I(out) <+ V(out) / ROUT_OHM;
         if (COUT_F > 0.0)
             I(out) <+ COUT_F * ddt(V(out));
+
+        // Input-referred noise (Coram-corrected flicker + thermal, paper Fig. 2).
+        if (ENABLE_NOISE != 0.0) begin
+            rn_noise = 1.0e-30;
+            if (EN_WHITE_V_PER_SQRT_HZ > 0.0) begin
+                rn_noise = (EN_WHITE_V_PER_SQRT_HZ * EN_WHITE_V_PER_SQRT_HZ)
+                         / (4.0 * `P_K * $temperature);
+                if (rn_noise < 1.0e-30)
+                    rn_noise = 1.0e-30;
+                I(inp, inn) <+ white_noise(4.0 * `P_K * $temperature / rn_noise, "thermal");
+            end
+            // Flicker on I(inp,inn) only (Spectre rejects V+I noise on same branch).
+            pn_flicker = 0.0;
+            if (EN_FLICKER_1HZ_V_PER_SQRT_HZ > 0.0) begin
+                pn_flicker = EN_FLICKER_1HZ_V_PER_SQRT_HZ
+                           * EN_FLICKER_1HZ_V_PER_SQRT_HZ;
+                if (RIN_OHM > 0.0)
+                    I(inp, inn) <+ flicker_noise(pn_flicker / (RIN_OHM * RIN_OHM),
+                                                  EN_FLICKER_EF, "flicker");
+            end else if (KF > 0.0 && abs(BIAS_CURRENT_A) > 0.0) begin
+                pn_flicker = KF * pow(abs(BIAS_CURRENT_A), AF);
+                ir_bias = BIAS_CURRENT_A;
+                if (ir_bias >= 0.0)
+                    I(inp, inn) <+ flicker_noise(pn_flicker, EN_FLICKER_EF, "flicker");
+                else
+                    I(inp, inn) <+ flicker_noise(-pn_flicker, EN_FLICKER_EF, "flicker");
+            end
+        end
     end
 
 endmodule

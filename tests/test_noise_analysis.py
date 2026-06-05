@@ -10,9 +10,11 @@ from opamp_model.io import log_frequency_sweep
 from opamp_model.model import simulate_noise
 from opamp_model.noise import input_referred_en
 from opamp_model.noise_analysis import (
+    compute_noise_breakdown,
     extract_noise_metrics,
     integrate_noise_rms,
     output_noise_spectrum,
+    plot_noise_breakdown,
     spot_noise_at_frequency,
 )
 
@@ -74,6 +76,36 @@ def test_simulate_noise_zero_when_ideal() -> None:
     result = simulate_noise(cfg, noise)
     assert np.all(result["noise_v_per_sqrt_hz"] == 0.0)
     assert result["metrics"]["integrated_noise_rms_v"] == 0.0
+
+
+def test_compute_noise_breakdown_white_dominates_at_high_f() -> None:
+    """At high frequency the total input density approaches the white floor."""
+    cfg = OpampConfig(a0_db=60.0, gbw_hz=1.0e6)
+    noise = OpampNoiseConfig(
+        en_white_v_per_sqrt_hz=4.0e-9,
+        en_flicker_1hz_v_per_sqrt_hz=40.0e-9,
+    )
+    f = log_frequency_sweep(1.0, 1.0e6, 20)
+    breakdown = compute_noise_breakdown(cfg, noise, f)
+    low_idx = 0
+    high_idx = -1
+    assert breakdown["en_in_total_v_per_sqrt_hz"][high_idx] == pytest.approx(
+        noise.en_white_v_per_sqrt_hz, rel=0.05
+    )
+    assert breakdown["en_out_total_v_per_sqrt_hz"][low_idx] > breakdown[
+        "en_in_total_v_per_sqrt_hz"
+    ][low_idx]
+
+
+def test_plot_noise_breakdown_writes_svg(tmp_path) -> None:
+    """Breakdown plot helper writes an SVG artifact."""
+    cfg = OpampConfig()
+    noise = OpampNoiseConfig(en_white_v_per_sqrt_hz=3.0e-9)
+    f = log_frequency_sweep(10.0, 100.0e3, 8)
+    breakdown = compute_noise_breakdown(cfg, noise, f)
+    svg = plot_noise_breakdown(breakdown, tmp_path / "noise_breakdown.svg")
+    assert svg.is_file()
+    assert "svg" in svg.read_text(encoding="utf-8").lower()
 
 
 def test_extract_noise_metrics_matches_simulate() -> None:

@@ -1,0 +1,54 @@
+// Open-loop output noise (Cadence Spectre).
+//
+// White + flicker noise are modeled in configurable_opamp.va (ENABLE_NOISE=1).
+// RN is a high-Z fallback when VA white noise is disabled; engine sets rn_white_ohm.
+//
+// Run via:
+//   python scripts/run_noise.py --simulator spectre --output-dir outputs/spectre
+
+simulator lang=spectre
+
+include "./testbench/spectre/opamp_include.scs"
+
+parameters a0_db=80
+parameters gbw_hz=10Meg
+parameters rin_ohm=1T
+parameters cin_f=1p
+parameters rout_ohm=100
+parameters cout_f=2p
+parameters en_white_v_per_sqrt_hz=5e-9
+parameters en_flicker_1hz_v_per_sqrt_hz=50e-9
+parameters en_flicker_ef=1
+parameters kf=0
+parameters af=1
+parameters bias_current_a=1u
+parameters enable_noise=1
+parameters en_flicker_corner_hz=100
+parameters en_flicker_at_1hz_v_per_sqrt_hz=50e-9
+parameters kT_v2_per_hz=4.142e-21
+parameters rn_white_ohm=PLACEHOLDER_RN
+parameters f_start=1
+parameters f_stop=100Meg
+parameters dec=10
+
+VDD (vdd 0) vsource dc=1.8
+VSS (vss 0) vsource dc=0.0
+VCM (inn 0) vsource dc=0.9 type=dc
+
+VAC (inp 0) vsource dc=0.9 type=sine ampl=1m freq=0 \
+    acmag=1 acphase=0
+
+RN (inp inn) resistor r=rn_white_ohm
+
+XOP (inp inn out vdd vss) configurable_opamp \
+    A0_DB=a0_db GBW_HZ=gbw_hz RIN_OHM=rin_ohm CIN_F=cin_f ROUT_OHM=rout_ohm COUT_F=cout_f \
+    EN_WHITE_V_PER_SQRT_HZ=en_white_v_per_sqrt_hz \
+    EN_FLICKER_1HZ_V_PER_SQRT_HZ=en_flicker_1hz_v_per_sqrt_hz \
+    EN_FLICKER_EF=en_flicker_ef KF=kf AF=af BIAS_CURRENT_A=bias_current_a \
+    ENABLE_NOISE=enable_noise
+
+ROUT (out 0) resistor r=rout_ohm
+
+save out
+ac ac start=f_start stop=f_stop dec=dec annotate=status
+noise noise start=f_start stop=f_stop dec=dec oprobe=ROUT iprobe=VAC annotate=status

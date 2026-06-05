@@ -10,6 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.noise_tran import input_referred_transient_noise, transient_noise_rms
 from opamp_model.plot_style import (
     FIGSIZE,
     LINE_COLORS,
@@ -26,6 +27,17 @@ class TranStepResult(TypedDict):
 
     time_s: NDArray[np.float64]
     vout_v: NDArray[np.float64]
+    vout_clean_v: NDArray[np.float64]
+    noise_v: NDArray[np.float64]
+
+
+class TranSineResult(TypedDict):
+    """Large-signal sine steady-state response."""
+
+    time_s: NDArray[np.float64]
+    vout_v: NDArray[np.float64]
+    vout_clean_v: NDArray[np.float64]
+    noise_v: NDArray[np.float64]
 
 
 class SlewMetrics(TypedDict):
@@ -68,7 +80,7 @@ def simulate_step_response(
 
     Args:
         cfg: Op-amp macromodel parameters.
-        noise: Reserved for future noise coupling (ignored).
+        noise: When enabled, input-referred noise is added to the output (unity follower).
         step_v: Input step amplitude (V) applied at ``t = 0`` relative to ``vcm_v``.
         duration_s: Simulation stop time (s).
         dt_s: Time step (s).
@@ -76,34 +88,48 @@ def simulate_step_response(
     Returns:
         Time vector and output voltage samples.
     """
-    _ = noise
     if duration_s <= 0.0 or dt_s <= 0.0:
         msg = f"Invalid transient setup: duration={duration_s}, dt={dt_s}"
         raise ValueError(msg)
 
     n = max(int(np.ceil(duration_s / dt_s)) + 1, 2)
     time_s = (np.arange(n, dtype=np.float64) * dt_s).astype(np.float64)
-    vout = np.empty(n, dtype=np.float64)
+    vout_clean = np.empty(n, dtype=np.float64)
 
     vcm = cfg.vcm_v
     vin_target = vcm + step_v
-    vout[0] = vcm
+    vout_clean[0] = vcm
     omega_ug = 2.0 * np.pi * cfg.gbw_hz
     slew_pos = abs(cfg.slew_pos_vps)
     slew_neg = cfg.slew_neg_vps if cfg.slew_neg_vps < 0.0 else -abs(cfg.slew_neg_vps)
 
     for idx in range(n - 1):
         vin = vin_target if time_s[idx] >= 0.0 else vcm
-        err = vin - vout[idx]
+        err = vin - vout_clean[idx]
         dv_ideal = omega_ug * err * dt_s
         dv = np.clip(dv_ideal, slew_neg * dt_s, slew_pos * dt_s)
-        vout[idx + 1] = np.clip(
-            vout[idx] + dv,
+        vout_clean[idx + 1] = np.clip(
+            vout_clean[idx] + dv,
             cfg.vswing_low_v,
             cfg.vswing_high_v,
         )
 
-    return TranStepResult(time_s=time_s, vout_v=vout)
+    noise_samples = (
+        input_referred_transient_noise(time_s, noise)
+        if noise is not None and noise.enabled
+        else np.zeros(n, dtype=np.float64)
+    )
+    vout = np.clip(
+        vout_clean + noise_samples,
+        cfg.vswing_low_v,
+        cfg.vswing_high_v,
+    )
+    return TranStepResult(
+        time_s=time_s,
+        vout_v=vout,
+        vout_clean_v=vout_clean,
+        noise_v=noise_samples,
+    )
 
 
 def _interp_crossing_time(
@@ -215,6 +241,7 @@ def plot_slew_step(
     *,
     title: str = "Unity-gain step response",
     metrics: SlewMetrics | None = None,
+    noise_rms_v: float | None = None,
 ) -> Path:
     """Plot positive and negative step responses and write an SVG."""
     apply_rcparams()
@@ -223,31 +250,83 @@ def plot_slew_step(
     t_neg = neg["time_s"]
     stride_pos = max(len(t_pos) // 512, 1)
     stride_neg = max(len(t_neg) // 512, 1)
+    show_noise = np.max(np.abs(pos["noise_v"])) > 0.0 or np.max(np.abs(neg["noise_v"])) > 0.0
+    if show_noise:
+        ax.plot(
+            t_pos[::stride_pos] * 1.0e6,
+            pos["vout_clean_v"][::stride_pos],
+            color=LINE_COLORS["gain"],
+            linewidth=LINEWIDTH_SECONDARY,
+            linestyle="--",
+            alpha=0.7,
+            label="SR+ (no noise)",
+        )
+        ax.plot(
+            t_neg[::stride_neg] * 1.0e6,
+            neg["vout_clean_v"][::stride_neg],
+            color=LINE_COLORS["phase"],
+            linewidth=LINEWIDTH_SECONDARY,
+            linestyle="--",
+            alpha=0.7,
+            label="SR− (no noise)",
+        )
     ax.plot(
         t_pos[::stride_pos] * 1.0e6,
         pos["vout_v"][::stride_pos],
         color=LINE_COLORS["gain"],
         linewidth=LINEWIDTH_MAIN,
-        label="SR+ step",
+        label="SR+ step" if show_noise else "SR+ step",
     )
     ax.plot(
         t_neg[::stride_neg] * 1.0e6,
         neg["vout_v"][::stride_neg],
         color=LINE_COLORS["phase"],
-        linewidth=LINEWIDTH_SECONDARY,
+        linewidth=LINEWIDTH_SECONDARY if not show_noise else LINEWIDTH_MAIN,
         label="SR− step",
     )
     ax.set_xlabel("Time (µs)", fontsize=13)
     ax.set_ylabel("Vout (V)", fontsize=13)
+    subtitle_parts: list[str] = []
     if metrics is not None:
-        subtitle = (
-            f"SR+={metrics['slew_pos_vps']:.3g} V/s  "
-            f"SR−={metrics['slew_neg_vps']:.3g} V/s"
+        subtitle_parts.append(
+            f"SR+={metrics['slew_pos_vps']:.3g} V/s  SR−={metrics['slew_neg_vps']:.3g} V/s"
         )
-        ax.set_title(f"{title}\n{subtitle}", fontsize=14)
+    if noise_rms_v is not None and np.isfinite(noise_rms_v) and noise_rms_v > 0.0:
+        subtitle_parts.append(f"noise RMS≈{noise_rms_v:.3g} V")
+    if subtitle_parts:
+        ax.set_title(f"{title}\n{'  '.join(subtitle_parts)}", fontsize=14)
     else:
         ax.set_title(title, fontsize=14)
     ax.legend(fontsize=9)
+    apply_style(ax)
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, format="svg")
+    plt.close(fig)
+    return output_path
+
+
+def plot_transient_noise_trace(
+    time_s: NDArray[np.float64],
+    noise_v: NDArray[np.float64],
+    output_path: Path,
+    *,
+    title: str = "Input-referred transient noise",
+    noise_rms_v: float | None = None,
+) -> Path:
+    """Plot noise-only samples vs time and write an SVG."""
+    apply_rcparams()
+    stride = downsample_stride(len(time_s))
+    t_us = time_s[::stride] * 1.0e6
+    n_plot = noise_v[::stride]
+    fig, ax = plt.subplots(figsize=FIGSIZE)
+    ax.plot(t_us, n_plot, color=LINE_COLORS["noise"], linewidth=LINEWIDTH_MAIN)
+    ax.set_xlabel("Time (µs)", fontsize=13)
+    ax.set_ylabel("Noise (V)", fontsize=13)
+    if noise_rms_v is not None and np.isfinite(noise_rms_v):
+        ax.set_title(f"{title}\nRMS = {noise_rms_v:.4g} V", fontsize=14)
+    else:
+        ax.set_title(title, fontsize=14)
     apply_style(ax)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -275,13 +354,13 @@ def simulate_sine_response(
     freq_hz: float,
     cycles: float,
     dt_s: float,
-) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> TranSineResult:
     """Simulate open-loop large-signal sine steady state with weak nonlinearity.
 
     Applies a memoryless polynomial: ``Vout = a1*Vin + a2*Vin^2 + a3*Vin^3``
     with ``a1 = cfg.a0_linear``, ``a2 = cfg.nl_a2``, ``a3 = cfg.nl_a3``.
+    Input-referred transient noise is added to the sine stimulus when enabled.
     """
-    _ = noise
     if freq_hz <= 0.0:
         raise ValueError(f"freq_hz must be positive, got {freq_hz}")
     if dt_s <= 0.0:
@@ -292,14 +371,31 @@ def simulate_sine_response(
     duration_s = cycles / freq_hz
     n_samples = max(int(np.ceil(duration_s / dt_s)) + 1, 2)
     time_s = np.linspace(0.0, duration_s, n_samples, dtype=np.float64)
-    vin_v = amplitude_v * np.sin(2.0 * np.pi * freq_hz * time_s)
+    vin_clean = amplitude_v * np.sin(2.0 * np.pi * freq_hz * time_s)
+    noise_samples = (
+        input_referred_transient_noise(time_s, noise)
+        if noise is not None and noise.enabled
+        else np.zeros(n_samples, dtype=np.float64)
+    )
+    vin_v = vin_clean + noise_samples
+    vout_clean = _apply_memoryless_nonlinearity(
+        vin_clean,
+        a1=cfg.a0_linear,
+        a2=cfg.nl_a2,
+        a3=cfg.nl_a3,
+    )
     vout_v = _apply_memoryless_nonlinearity(
         vin_v,
         a1=cfg.a0_linear,
         a2=cfg.nl_a2,
         a3=cfg.nl_a3,
     )
-    return time_s, vout_v
+    return TranSineResult(
+        time_s=time_s.astype(np.float64),
+        vout_v=vout_v.astype(np.float64),
+        vout_clean_v=vout_clean.astype(np.float64),
+        noise_v=noise_samples.astype(np.float64),
+    )
 
 
 def _harmonic_amplitude(
@@ -390,6 +486,8 @@ def plot_thd_waveform(
     *,
     freq_hz: float,
     title: str = "THD sine response",
+    vout_clean_v: NDArray[np.float64] | None = None,
+    noise_rms_v: float | None = None,
 ) -> Path:
     """Plot output voltage vs time and write an SVG."""
     apply_rcparams()
@@ -399,10 +497,31 @@ def plot_thd_waveform(
     period_ms = 1.0e3 / freq_hz if freq_hz > 0.0 else 1.0
 
     fig, ax = plt.subplots(figsize=FIGSIZE)
-    ax.plot(t_ms, y_plot, color=LINE_COLORS["gain"], linewidth=LINEWIDTH_MAIN)
+    if vout_clean_v is not None and np.max(np.abs(vout_v - vout_clean_v)) > 0.0:
+        ax.plot(
+            t_ms,
+            vout_clean_v[::stride],
+            color=LINE_COLORS["gain"],
+            linewidth=LINEWIDTH_SECONDARY,
+            linestyle="--",
+            alpha=0.7,
+            label="No noise",
+        )
+    ax.plot(
+        t_ms,
+        y_plot,
+        color=LINE_COLORS["gain"],
+        linewidth=LINEWIDTH_MAIN,
+        label="With noise" if vout_clean_v is not None else None,
+    )
     ax.set_xlabel("Time (ms)", fontsize=13)
     ax.set_ylabel("Vout (V)", fontsize=13)
-    ax.set_title(f"{title}\n$f$ = {freq_hz:.6g} Hz, period = {period_ms:.4g} ms", fontsize=14)
+    subtitle = f"$f$ = {freq_hz:.6g} Hz, period = {period_ms:.4g} ms"
+    if noise_rms_v is not None and np.isfinite(noise_rms_v) and noise_rms_v > 0.0:
+        subtitle += f"  noise RMS≈{noise_rms_v:.3g} V"
+    ax.set_title(f"{title}\n{subtitle}", fontsize=14)
+    if vout_clean_v is not None:
+        ax.legend(fontsize=9)
     apply_style(ax)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -419,6 +538,7 @@ def plot_thd_spectrum(
     *,
     thd: ThdMetrics | None = None,
     title: str = "THD spectrum",
+    vout_clean_v: NDArray[np.float64] | None = None,
 ) -> Path:
     """Plot one-sided magnitude spectrum and write an SVG."""
     apply_rcparams()
@@ -431,11 +551,24 @@ def plot_thd_spectrum(
     freqs_hz = np.fft.rfftfreq(y_ac.size, dt)
 
     fig, ax = plt.subplots(figsize=FIGSIZE)
+    if vout_clean_v is not None:
+        y_clean = vout_clean_v - np.mean(vout_clean_v)
+        spec_clean = np.abs(np.fft.rfft(y_clean * window)) / (0.5 * window.sum())
+        ax.semilogy(
+            freqs_hz[1:],
+            spec_clean[1:],
+            color=LINE_COLORS["gain"],
+            linewidth=LINEWIDTH_SECONDARY,
+            linestyle="--",
+            alpha=0.7,
+            label="No noise",
+        )
     ax.semilogy(
         freqs_hz[1:],
         spectrum[1:],
         color=LINE_COLORS["psrr"],
         linewidth=LINEWIDTH_SECONDARY,
+        label="With noise" if vout_clean_v is not None else None,
     )
     ax.axvline(fundamental_hz, color=LINE_COLORS["gain"], linewidth=1.5, linestyle="--")
     ax.set_xlabel("Frequency (Hz)", fontsize=13)
@@ -444,6 +577,8 @@ def plot_thd_spectrum(
     if thd is not None and np.isfinite(thd["thd_db"]):
         subtitle = f"THD = {thd['thd_db']:.2f} dB"
     ax.set_title(f"{title}\n{subtitle}".rstrip(), fontsize=14)
+    if vout_clean_v is not None:
+        ax.legend(fontsize=9)
     apply_style(ax)
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)

@@ -32,6 +32,7 @@ from opamp_model.tran import (
     plot_thd_spectrum,
     plot_thd_waveform,
     simulate_sine_response,
+    transient_noise_rms,
 )
 
 
@@ -97,7 +98,7 @@ def main() -> None:
         log.close()
         raise SystemExit(str(exc)) from exc
 
-    time_s, vout_v = simulate_sine_response(
+    sine = simulate_sine_response(
         cfg,
         noise,
         amplitude_v=args.amplitude_v,
@@ -105,6 +106,9 @@ def main() -> None:
         cycles=args.cycles,
         dt_s=args.dt_s,
     )
+    time_s = sine["time_s"]
+    vout_v = sine["vout_v"]
+    noise_rms_v = transient_noise_rms(sine["noise_v"]) if noise.enabled else 0.0
 
     skip_thd = is_thd_ideal(cfg, ideal_flag=args.ideal)
     thd = None if skip_thd else compute_thd(time_s, vout_v, args.freq_hz)
@@ -114,13 +118,21 @@ def main() -> None:
 
     waveform_svg = out_dir / "thd_waveform.svg"
     spectrum_svg = out_dir / "thd_spectrum.svg"
-    plot_thd_waveform(time_s, vout_v, waveform_svg, freq_hz=args.freq_hz)
+    plot_thd_waveform(
+        time_s,
+        vout_v,
+        waveform_svg,
+        freq_hz=args.freq_hz,
+        vout_clean_v=sine["vout_clean_v"],
+        noise_rms_v=noise_rms_v,
+    )
     plot_thd_spectrum(
         time_s,
         vout_v,
         args.freq_hz,
         spectrum_svg,
         thd=thd,
+        vout_clean_v=sine["vout_clean_v"],
     )
 
     report = build_metrics_report(
@@ -144,6 +156,7 @@ def main() -> None:
         thd=thd,
         freq_hz=args.freq_hz,
         amplitude_v=args.amplitude_v,
+        noise_rms_v=noise_rms_v,
     )
     engine_md = write_engine_report(out_dir, engine=args.simulator)
     archive_veriloga_artifacts(package_root(), out_dir)

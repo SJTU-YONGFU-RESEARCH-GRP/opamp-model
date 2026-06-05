@@ -13,6 +13,15 @@ THD_WAVEFORM_COLUMNS = ("time_s", "vout_v")
 CMRR_COLUMNS = ("frequency_hz", "acm_db", "cmrr_db")
 PSRR_COLUMNS = ("frequency_hz", "psrr_db")
 NOISE_COLUMNS = ("frequency_hz", "noise_v_per_sqrt_hz")
+NOISE_BREAKDOWN_COLUMNS = (
+    "frequency_hz",
+    "en_in_white_v_per_sqrt_hz",
+    "en_in_flicker_v_per_sqrt_hz",
+    "en_in_total_v_per_sqrt_hz",
+    "en_out_white_v_per_sqrt_hz",
+    "en_out_flicker_v_per_sqrt_hz",
+    "en_out_total_v_per_sqrt_hz",
+)
 TIA_COLUMNS = ("frequency_hz", "zt_ohm", "zt_db", "zt_phase_deg")
 
 
@@ -62,6 +71,37 @@ def write_bode_csv(
     np.savetxt(path, data, delimiter=",", header=header, comments="")
 
 
+def read_ngspice_noise_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
+    """Read ngspice ``wrdata`` from a ``.noise`` analysis.
+
+    With ``wr_singlescale``, leading columns may repeat frequency; density columns
+    are taken from the last two columns (``onoise_spectrum``, ``inoise_spectrum``).
+    """
+    table = np.loadtxt(path)
+    if table.ndim == 1:
+        table = table.reshape(1, -1)
+    if table.shape[1] < 3:
+        msg = f"Expected >= 3 columns in noise wrdata, got {table.shape[1]}."
+        raise ValueError(msg)
+    if table.shape[1] >= 6:
+        return {
+            "frequency_hz": table[:, 0].astype(np.float64),
+            "onoise_v_per_sqrt_hz": table[:, -2].astype(np.float64),
+            "inoise_v_per_sqrt_hz": table[:, -1].astype(np.float64),
+        }
+    if table.shape[1] >= 4:
+        return {
+            "frequency_hz": table[:, 0].astype(np.float64),
+            "onoise_v_per_sqrt_hz": table[:, -1].astype(np.float64),
+            "inoise_v_per_sqrt_hz": table[:, -1].astype(np.float64),
+        }
+    return {
+        "frequency_hz": table[:, 0].astype(np.float64),
+        "onoise_v_per_sqrt_hz": table[:, 1].astype(np.float64),
+        "inoise_v_per_sqrt_hz": table[:, 2].astype(np.float64),
+    }
+
+
 def read_ngspice_ac_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
     """Read ngspice ``wrdata`` from AC analysis (frequency, vdb, vp columns).
 
@@ -99,6 +139,33 @@ def write_noise_csv(
     path.parent.mkdir(parents=True, exist_ok=True)
     data = np.column_stack([frequency_hz, noise_v_per_sqrt_hz])
     header = ",".join(NOISE_COLUMNS)
+    np.savetxt(path, data, delimiter=",", header=header, comments="")
+
+
+def write_noise_breakdown_csv(
+    path: Path,
+    frequency_hz: NDArray[np.float64],
+    en_in_white_v_per_sqrt_hz: NDArray[np.float64],
+    en_in_flicker_v_per_sqrt_hz: NDArray[np.float64],
+    en_in_total_v_per_sqrt_hz: NDArray[np.float64],
+    en_out_white_v_per_sqrt_hz: NDArray[np.float64],
+    en_out_flicker_v_per_sqrt_hz: NDArray[np.float64],
+    en_out_total_v_per_sqrt_hz: NDArray[np.float64],
+) -> None:
+    """Write white/flicker/total noise breakdown at input and output."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = np.column_stack(
+        [
+            frequency_hz,
+            en_in_white_v_per_sqrt_hz,
+            en_in_flicker_v_per_sqrt_hz,
+            en_in_total_v_per_sqrt_hz,
+            en_out_white_v_per_sqrt_hz,
+            en_out_flicker_v_per_sqrt_hz,
+            en_out_total_v_per_sqrt_hz,
+        ]
+    )
+    header = ",".join(NOISE_BREAKDOWN_COLUMNS)
     np.savetxt(path, data, delimiter=",", header=header, comments="")
 
 

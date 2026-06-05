@@ -4,12 +4,17 @@
 #   A0 ≤ 0.1 dB, GBW ≤ 5%, phase margin ≤ 2°, integrated noise RMS ≤ 5%.
 # Keys map to opamp_metrics.json fields (slew_v_per_us → slew_pos/neg_vps in V/s).
 #
+# Flicker noise (Phase 1): en_flicker_1hz is true density at 1 Hz (paper pwr / Spectre
+# flicker_noise). Legacy en_flicker_at_1hz_nv_per_sqrt_hz + en_flicker_corner_hz remain
+# for backward compatibility; en_flicker_1hz = en_flicker_at_1hz * sqrt(en_flicker_corner_hz).
+#
 # Units:
 #   *_db — decibels
 #   *_hz — hertz
 #   *_ohm, *_f — ohms, farads
 #   slew_v_per_us — volts per microsecond
 #   en_white_nv_per_sqrt_hz — nanovolts per sqrt(hertz), input-referred
+#   en_flicker_1hz_nv_per_sqrt_hz — nanovolts per sqrt(hertz) at exactly 1 Hz
 
 a0_db: 80.0
 gbw_hz: 10.0e6
@@ -27,5 +32,17 @@ cout_f: 2.0e-12
 loop_beta: 1.0
 slew_v_per_us: 10.0
 en_white_nv_per_sqrt_hz: 5.0
+
+# Phase 1 — paper-aligned flicker (Zhou et al., NEWCAS 2021)
+en_flicker_1hz_nv_per_sqrt_hz: 50.0
+en_flicker_ef: 1.0
+flicker_corner_hz: 100.0  # computed: (en_flicker_1hz / en_white)^(2/EF)
+
+# Legacy aliases (scale-factor form; equivalent to above when corner = 100 Hz)
 en_flicker_corner_hz: 100.0
-en_flicker_at_1hz_nv_per_sqrt_hz: 50.0
+en_flicker_at_1hz_nv_per_sqrt_hz: 5.0  # 5 nV * sqrt(100 Hz) = 50 nV at 1 Hz
+
+# Phase 2 — Coram KF/AF (optional; when kf > 0, en_flicker_1hz derived from bias)
+kf: 0.0
+af: 1.0
+bias_current_a: 1.0e-6

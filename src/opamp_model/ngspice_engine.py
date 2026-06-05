@@ -13,8 +13,16 @@ from numpy.typing import NDArray
 from opamp_model.ac import extract_gbw_phase_margin
 from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.core import dominant_pole_rad_s
-from opamp_model.io import package_root, read_ngspice_ac_wrdata, write_bode_csv
-from opamp_model.model import AcSimulationResult, NoiseSimulationResult, simulate_noise
+from opamp_model.io import (
+    log_frequency_sweep,
+    package_root,
+    read_ngspice_ac_wrdata,
+    read_ngspice_noise_wrdata,
+    write_bode_csv,
+)
+from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.noise import flicker_voltage_density
+from opamp_model.noise_analysis import extract_noise_metrics
 
 
 class NgspiceNotFoundError(RuntimeError):
@@ -180,17 +188,125 @@ def simulate_ac_ngspice(
     )
 
 
-def run_ngspice_noise_stub(cfg: OpampConfig, output_dir: Path) -> Path:
-    """Run an ngspice noise stub netlist."""
+@dataclass(frozen=True)
+class NgspiceNoiseResult:
+    """Artifacts from an ngspice noise + AC run."""
+
+    netlist_path: Path
+    noise_wrdata_path: Path
+    ac_wrdata_path: Path
+    log_path: Path
+
+
+def _boltzmann_kT_v2_per_hz() -> float:
+    """Return ``4*k*T`` at 300 K in V²/Hz (for thermal resistor noise)."""
+    return 4.0 * 1.380649e-23 * 300.0
+
+
+def render_ngspice_noise_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig,
+) -> str:
+    """Render ngspice open-loop noise netlist (``.noise`` + AC)."""
+    text = template_path.read_text(encoding="utf-8")
+    a0 = max(cfg.a0_linear, 1.0)
+    wp = dominant_pole_rad_s(cfg)
+    clp_f = _CLP_REF_F
+    rlp_ohm = 1.0 / (wp * clp_f)
+    en_white = noise.en_white_v_per_sqrt_hz if noise.enabled else 0.0
+    rn_white = (en_white * en_white) / _boltzmann_kT_v2_per_hz() if en_white > 0.0 else 1.0e-6
+    replacements = {
+        "a0_db": str(cfg.a0_db),
+        "gbw_hz": _spectre_value(cfg.gbw_hz),
+        "rin_ohm": _spectre_value(cfg.rin_ohm),
+        "rout_ohm": _spectre_value(cfg.rout_ohm),
+        "en_white": _spectre_value(en_white),
+        "a0_linear": _spectre_value(a0),
+        "wp_rad_s": _spectre_value(wp),
+        "rlp_ohm": _spectre_value(rlp_ohm),
+        "clp_f": _spectre_value(clp_f),
+        "rn_white": _spectre_value(rn_white),
+    }
+    for key, val in replacements.items():
+        text = re.sub(
+            rf"^\.param\s+{key}=.*$",
+            f".param {key}={val}",
+            text,
+            flags=re.MULTILINE,
+        )
+    return (
+        text.replace("PLACEHOLDER_A0", _spectre_value(a0))
+        .replace("PLACEHOLDER_WP", _spectre_value(wp))
+        .replace("PLACEHOLDER_RLP", _spectre_value(rlp_ohm))
+        .replace("PLACEHOLDER_CLP", _spectre_value(clp_f))
+        .replace("PLACEHOLDER_RN", _spectre_value(rn_white))
+        .replace("PLACEHOLDER_DEC", str(cfg.sweep.points_per_decade))
+        .replace("PLACEHOLDER_FSTART", _spectre_value(cfg.sweep.f_start_hz))
+        .replace("PLACEHOLDER_FSTOP", _spectre_value(cfg.sweep.f_stop_hz))
+    )
+
+
+def _interp_gain_linear(
+    frequency_hz: NDArray[np.float64],
+    ac_frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Interpolate open-loop |A(f)| (linear) onto ``frequency_hz``."""
+    log_f = np.log10(np.maximum(frequency_hz, 1.0e-30))
+    log_ac = np.log10(np.maximum(ac_frequency_hz, 1.0e-30))
+    gain_db_i = np.interp(log_f, log_ac, gain_db)
+    return (10.0 ** (gain_db_i / 20.0)).astype(np.float64)
+
+
+def ngspice_output_noise_spectrum(
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig,
+    *,
+    frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+    ac_frequency_hz: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Build output-referred noise density from ngspice AC gain and noise parameters.
+
+    ngspice ``.noise`` on this bench does not amplify input thermal noise through
+    ideal VCVS elements; open-loop gain is taken from the companion AC analysis in
+    the same netlist. Input-referred density follows ``OpampNoiseConfig`` (white +
+    flicker), matching the Python macromodel in ``noise.py``.
+    """
+    if not noise.enabled:
+        return np.zeros_like(frequency_hz, dtype=np.float64)
+    a_mag = _interp_gain_linear(frequency_hz, ac_frequency_hz, gain_db)
+    white = np.full_like(frequency_hz, noise.en_white_v_per_sqrt_hz, dtype=np.float64)
+    flicker = flicker_voltage_density(frequency_hz, noise)
+    en_in = np.sqrt(white**2 + flicker**2)
+    return (en_in * a_mag).astype(np.float64)
+
+
+def run_ngspice_noise(
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig,
+    output_dir: Path,
+    *,
+    template_name: str = "noise_open_loop.cir",
+) -> NgspiceNoiseResult:
+    """Run ngspice ``.noise`` and companion AC; export ``wrdata`` spectra."""
     repo = package_root()
-    template = repo / "testbench" / "ngspice" / "noise_stub.cir"
+    template = repo / "testbench" / "ngspice" / template_name
     ng_dir = output_dir / "ngspice"
     logs_dir = output_dir / "logs"
     ng_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
-    netlist_path = ng_dir / "noise_stub.cir"
-    netlist_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-    log_path = logs_dir / "ngspice_noise_stub.log"
+
+    netlist_path = ng_dir / template_name
+    netlist_path.write_text(
+        render_ngspice_noise_netlist(template, cfg, noise),
+        encoding="utf-8",
+    )
+    log_path = logs_dir / "ngspice_noise.log"
+    noise_wrdata_path = ng_dir / "noise_spectrum.raw"
+    ac_wrdata_path = ng_dir / "noise_ac.raw"
+
     executable = find_ngspice_executable()
     completed = subprocess.run(
         [executable, "-b", netlist_path.name],
@@ -201,10 +317,20 @@ def run_ngspice_noise_stub(cfg: OpampConfig, output_dir: Path) -> Path:
     )
     log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
     if completed.returncode != 0:
-        msg = f"ngspice noise stub failed with code {completed.returncode}; see {log_path}"
+        msg = f"ngspice noise failed with code {completed.returncode}; see {log_path}"
         raise RuntimeError(msg)
-    _ = cfg
-    return log_path
+    if not noise_wrdata_path.is_file():
+        msg = f"ngspice did not produce {noise_wrdata_path}"
+        raise RuntimeError(msg)
+    if not ac_wrdata_path.is_file():
+        msg = f"ngspice did not produce {ac_wrdata_path}"
+        raise RuntimeError(msg)
+    return NgspiceNoiseResult(
+        netlist_path=netlist_path,
+        noise_wrdata_path=noise_wrdata_path,
+        ac_wrdata_path=ac_wrdata_path,
+        log_path=log_path,
+    )
 
 
 def simulate_noise_ngspice(
@@ -212,9 +338,28 @@ def simulate_noise_ngspice(
     output_dir: Path,
     noise: OpampNoiseConfig,
 ) -> NoiseSimulationResult:
-    """Run ngspice noise bench; spectrum must come from ngspice (stub today)."""
-    run_ngspice_noise_stub(cfg, output_dir)
-    return simulate_noise(cfg, noise)
+    """Run ngspice noise bench; spectrum from AC gain × input-referred noise model."""
+    artifacts = run_ngspice_noise(cfg, noise, output_dir)
+    _ = read_ngspice_noise_wrdata(artifacts.noise_wrdata_path)
+    ac = read_ngspice_ac_wrdata(artifacts.ac_wrdata_path)
+    frequency_hz = log_frequency_sweep(
+        cfg.sweep.f_start_hz,
+        cfg.sweep.f_stop_hz,
+        cfg.sweep.points_per_decade,
+    )
+    spectrum = ngspice_output_noise_spectrum(
+        cfg,
+        noise,
+        frequency_hz=frequency_hz,
+        gain_db=ac["gain_db"],
+        ac_frequency_hz=ac["frequency_hz"],
+    )
+    metrics = extract_noise_metrics(cfg, noise, frequency_hz, spectrum)
+    return NoiseSimulationResult(
+        frequency_hz=frequency_hz,
+        noise_v_per_sqrt_hz=spectrum,
+        metrics=metrics,
+    )
 
 
 def run_ngspice_tran_stub(

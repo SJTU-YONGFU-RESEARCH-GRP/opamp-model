@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import argparse
 
-from opamp_model.config import GmConfig, OpampConfig, OpampNoiseConfig, TiaConfig
+from opamp_model.config import (
+    GmConfig,
+    OpampConfig,
+    OpampNoiseConfig,
+    TiaConfig,
+)
 
 
 def add_opamp_args(parser: argparse.ArgumentParser) -> None:
@@ -43,7 +48,44 @@ def add_noise_args(parser: argparse.ArgumentParser) -> None:
         dest="en_white_nv",
         help="Input-referred white noise (nV/sqrt(Hz)).",
     )
-    parser.add_argument("--en-flicker-corner-hz", type=float, default=100.0)
+    parser.add_argument(
+        "--en-flicker-1hz-nv-per-sqrt-hz",
+        type=float,
+        default=None,
+        dest="en_flicker_1hz_nv",
+        help="Input-referred flicker density at 1 Hz (nV/sqrt(Hz)).",
+    )
+    parser.add_argument(
+        "--en-flicker-ef",
+        type=float,
+        default=1.0,
+        help="Flicker exponent EF (density scales as 1/f^(EF/2)).",
+    )
+    parser.add_argument(
+        "--en-flicker-corner-hz",
+        type=float,
+        default=None,
+        dest="en_flicker_corner_hz",
+        help="Legacy: derive flicker @1 Hz from white and corner when 1 Hz not set.",
+    )
+    parser.add_argument(
+        "--kf",
+        type=float,
+        default=0.0,
+        help="Coram flicker coefficient (power at 1 Hz = KF * |I|^AF when > 0).",
+    )
+    parser.add_argument(
+        "--af",
+        type=float,
+        default=1.0,
+        help="Coram flicker current exponent AF.",
+    )
+    parser.add_argument(
+        "--bias-current-a",
+        type=float,
+        default=0.0,
+        help="Bias current (A) for Coram flicker model.",
+    )
     parser.add_argument(
         "--nl-a2",
         type=float,
@@ -122,16 +164,24 @@ def build_noise_config(args: argparse.Namespace) -> OpampNoiseConfig:
     if args.ideal:
         return OpampNoiseConfig(
             en_white_v_per_sqrt_hz=0.0,
-            en_flicker_at_1hz_v_per_sqrt_hz=0.0,
+            en_flicker_1hz_v_per_sqrt_hz=0.0,
             in_white_a_per_sqrt_hz=0.0,
-            in_flicker_at_1hz_a_per_sqrt_hz=0.0,
+            in_flicker_1hz_a_per_sqrt_hz=0.0,
             noise_seed=args.noise_seed,
         )
-    return OpampNoiseConfig(
-        en_white_v_per_sqrt_hz=args.en_white_nv * 1.0e-9,
-        en_flicker_corner_hz=args.en_flicker_corner_hz,
-        noise_seed=args.noise_seed,
-    )
+    kwargs: dict[str, float | int] = {
+        "en_white_v_per_sqrt_hz": args.en_white_nv * 1.0e-9,
+        "en_flicker_ef": args.en_flicker_ef,
+        "kf": args.kf,
+        "af": args.af,
+        "bias_current_a": args.bias_current_a,
+        "noise_seed": args.noise_seed,
+    }
+    if args.en_flicker_1hz_nv is not None:
+        kwargs["en_flicker_1hz_v_per_sqrt_hz"] = args.en_flicker_1hz_nv * 1.0e-9
+    if args.en_flicker_corner_hz is not None:
+        kwargs["en_flicker_corner_hz"] = args.en_flicker_corner_hz
+    return OpampNoiseConfig(**kwargs)
 
 
 def add_tia_args(parser: argparse.ArgumentParser) -> None:
@@ -163,3 +213,4 @@ def build_gm_config(args: argparse.Namespace) -> GmConfig:
         rout_ohm=getattr(args, "gm_rout_ohm", 1.0e6),
         cout_f=getattr(args, "gm_cout_f", 500.0e-15),
     )
+

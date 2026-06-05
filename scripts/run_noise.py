@@ -15,11 +15,15 @@ from opamp_model.cli_helpers import (
     build_opamp_config,
     resolve_engine_label,
 )
-from opamp_model.io import package_root, write_noise_csv
+from opamp_model.io import package_root, write_noise_breakdown_csv, write_noise_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
 from opamp_model.model import simulate_noise
 from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_noise_ngspice
-from opamp_model.noise_analysis import plot_noise_spectrum
+from opamp_model.noise_analysis import (
+    compute_noise_breakdown,
+    plot_noise_breakdown,
+    plot_noise_spectrum,
+)
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
@@ -76,6 +80,20 @@ def main() -> None:
         title="Output-referred noise",
         metrics=result["metrics"],
     )
+    breakdown = compute_noise_breakdown(cfg, noise, result["frequency_hz"])
+    breakdown_csv = out_dir / "noise_breakdown.csv"
+    write_noise_breakdown_csv(
+        breakdown_csv,
+        breakdown["frequency_hz"],
+        breakdown["en_in_white_v_per_sqrt_hz"],
+        breakdown["en_in_flicker_v_per_sqrt_hz"],
+        breakdown["en_in_total_v_per_sqrt_hz"],
+        breakdown["en_out_white_v_per_sqrt_hz"],
+        breakdown["en_out_flicker_v_per_sqrt_hz"],
+        breakdown["en_out_total_v_per_sqrt_hz"],
+    )
+    breakdown_svg = out_dir / "noise_breakdown.svg"
+    plot_noise_breakdown(breakdown, breakdown_svg)
     report = build_metrics_report(
         cfg,
         noise,
@@ -91,18 +109,24 @@ def main() -> None:
         noise=noise,
         report=report,
         spectrum_svg=spectrum_svg,
+        breakdown_svg=breakdown_svg,
+        breakdown=breakdown,
     )
     engine_md = write_engine_report(out_dir, engine=args.simulator)
     archive_veriloga_artifacts(package_root(), out_dir)
     log.write(f"wrote {csv_path}")
+    log.write(f"wrote {breakdown_csv}")
     log.write(f"wrote {spectrum_svg}")
+    log.write(f"wrote {breakdown_svg}")
     log.write(f"wrote {noise_md}")
     log.write(f"wrote {out_dir / 'opamp_metrics.json'}")
     if engine_md is not None:
         log.write(f"wrote {engine_md}")
     log.close()
     print(f"Wrote {csv_path}")
+    print(f"Wrote {breakdown_csv}")
     print(f"Wrote {spectrum_svg}")
+    print(f"Wrote {breakdown_svg}")
     print(f"Wrote {noise_md}")
     print(f"Wrote {out_dir / 'opamp_metrics.json'}")
     print(format_metrics_table(report))

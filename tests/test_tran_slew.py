@@ -5,11 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from opamp_model.config import OpampConfig
+from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.tran import (
     extract_slew_rate,
     measure_slew_rates,
     simulate_step_response,
+    transient_noise_rms,
 )
 
 
@@ -55,6 +56,26 @@ def test_measured_slew_matches_config() -> None:
     )
     assert metrics["slew_pos_vps"] == pytest.approx(slew, rel=0.15)
     assert metrics["slew_neg_vps"] == pytest.approx(-slew, rel=0.15)
+
+
+def test_step_response_includes_noise_overlay_fields() -> None:
+    """Noise-enabled step simulation returns clean and noise traces."""
+    cfg = OpampConfig(gbw_hz=1.0e6, slew_pos_vps=5.0e6, slew_neg_vps=-5.0e6)
+    noise = OpampNoiseConfig(
+        en_white_v_per_sqrt_hz=1.0e-4,
+        en_flicker_1hz_v_per_sqrt_hz=0.0,
+        noise_seed=1,
+    )
+    result = simulate_step_response(
+        cfg,
+        noise,
+        step_v=0.5,
+        duration_s=1.0e-6,
+        dt_s=1.0e-9,
+    )
+    assert result["vout_clean_v"].shape == result["vout_v"].shape
+    assert transient_noise_rms(result["noise_v"]) > 0.0
+    assert np.max(np.abs(result["vout_v"] - result["vout_clean_v"])) > 0.0
 
 
 def test_extract_slew_rate_on_linear_ramp() -> None:
