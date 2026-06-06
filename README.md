@@ -36,7 +36,7 @@ Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductanc
 
 | Area | What is included |
 | --- | --- |
-| **Models** | Voltage op-amp (dominant-pole core, CMRR/PSRR, impedance, noise, slew, weak nonlinearity); TIA/Gm configs and Verilog-A shells (closed-loop **planned**) |
+| **Models** | Voltage op-amp (dominant-pole core, CMRR/PSRR, impedance, noise, slew, weak nonlinearity); TIA/Gm closed-loop Python macromodels (`run_tia_ac.py`, `run_gm_ac.py`) |
 | **Engines** | `python` (closed-form / numerical), `ngspice` (`testbench/ngspice/`, AC `wrdata`), `spectre` (`veriloga/` + `testbench/spectre/`) |
 | **Benches** | `run_ac.py`, `run_stb.py`, `run_noise.py`, `run_psrr.py`, `run_slew.py`, `run_thd.py` |
 | **Artifacts** | Per-bench `*_REPORT.md`, SVG plots, CSV sweeps, `opamp_metrics.json`, engine-level `REPORT.md` |
@@ -118,10 +118,11 @@ Options: `--output-root DIR`, `--skip-missing` (skip ngspice/Spectre when binari
 
 | Bench | python | ngspice | spectre |
 | --- | --- | --- | --- |
-| AC / STB | Full | Parsed Bode | Netlist + Python Bode (PSF TBD) |
-| Noise | Full | Stub + Python spectrum | Stub + Python spectrum |
+| AC / STB | Full | Parsed `wrdata` Bode | PSF Bode (`spectre_psf.py`) |
+| Noise | Full | Hybrid: SPICE AC × config | Hybrid: PSF AC × config |
 | PSRR | Full | Python macromodel | Python macromodel |
-| Slew / THD | Full | — | — |
+| Slew / THD | Full | Batch: — | Batch: — |
+| TIA / Gm AC | Full | Python macromodel | Python macromodel |
 
 See [docs/bench_spec.md](docs/bench_spec.md) for artifacts and netlist paths.
 
@@ -191,7 +192,7 @@ After running benches for each engine, check peer spread against compare limits 
 python scripts/compare_engines.py --output-root outputs
 ```
 
-Optional reference column from `docs/golden_metrics.yaml` (not used for pass/fail). Writes `outputs/COMPARE_REPORT.md` with spread, limit, and status columns. Exit code is non-zero when spread exceeds tolerance.
+Optional reference column from `docs/golden_metrics.yaml` (not used for pass/fail). Writes `outputs/COMPARE_REPORT.md` with spread, limit, and status columns. Metrics tagged `python_macromodel`, `hybrid_noise_merge`, or `tran_scaffold` show status **n/a** (parity not checked). Exit code is non-zero when spread exceeds tolerance on comparable metrics.
 
 ## Metrics and outputs
 

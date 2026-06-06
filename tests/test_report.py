@@ -12,6 +12,7 @@ from opamp_model.report import (
     preserve_metrics_sections,
     write_ac_report,
     write_engine_report,
+    write_slew_report,
     write_stb_report,
 )
 
@@ -74,6 +75,33 @@ def test_engine_report_links_benches(tmp_path: Path) -> None:
     text = engine_md.read_text(encoding="utf-8")
     assert "[AC open-loop](AC_REPORT.md)" in text
     assert "[STB loop gain](STB_REPORT.md)" in text
+
+
+def test_engine_report_shows_tran_scaffold_note(tmp_path: Path) -> None:
+    """REPORT.md notes when TRAN curves come from the Python macromodel."""
+    cfg = OpampConfig()
+    noise = OpampNoiseConfig()
+    report = build_metrics_report(
+        cfg,
+        noise,
+        engine="ngspice",
+        slew_pos_measured=5e6,
+        slew_neg_measured=-5e6,
+    )
+    slew_svg = tmp_path / "slew.svg"
+    slew_svg.write_text("<svg></svg>", encoding="utf-8")
+    write_slew_report(
+        tmp_path,
+        engine="ngspice",
+        cfg=cfg,
+        report=report,
+        slew_svg=slew_svg,
+    )
+    engine_md = write_engine_report(tmp_path, engine="ngspice")
+    assert engine_md is not None
+    text = engine_md.read_text(encoding="utf-8")
+    assert "TRAN scaffold" in text
+    assert "[TRAN slew rate](SLEW_REPORT.md)" in text
 
 
 def test_preserve_metrics_sections_keeps_ac() -> None:

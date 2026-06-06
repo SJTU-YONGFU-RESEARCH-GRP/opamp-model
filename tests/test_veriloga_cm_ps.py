@@ -93,6 +93,8 @@ def _assert_spectre_compile_ok(completed: subprocess.CompletedProcess[str]) -> N
 def test_veriloga_declares_cm_ps_parameters() -> None:
     """VA module exposes CMRR_DB, PSRR_DB, PSRR_POLE_HZ matching OpampConfig."""
     va = _va_path().read_text(encoding="utf-8")
+    assert "parameter real FP2_HZ" in va
+    assert "parameter real FZ_HZ" in va
     assert "parameter real CMRR_DB" in va
     assert "parameter real PSRR_DB" in va
     assert "parameter real PSRR_POLE_HZ" in va
@@ -104,6 +106,8 @@ def test_veriloga_laplace_uses_array_variables_for_cm_ps() -> None:
     """Spectre laplace_nd coeffs for diff, CM, and PS paths use array variables."""
     va = _va_path().read_text(encoding="utf-8")
     assert "real numer[0:1]" in va
+    assert "real fp2_numer[0:1]" in va
+    assert "real fz_numer[0:1]" in va
     assert "real cm_numer[0:1]" in va
     assert "real ps_numer[0:1]" in va
     assert "laplace_nd(V(inp) - V(inn), numer, denom)" in va
@@ -111,6 +115,8 @@ def test_veriloga_laplace_uses_array_variables_for_cm_ps() -> None:
     assert "laplace_nd(V(vdd), ps_numer, ps_denom)" in va
     assert "cm_numer[0] = numer[0] / cmrr_linear" in va
     assert "ps_numer[0] = (1.0 / psrr_linear) * wp_psrr" in va
+    assert "wp2 = 1.0e30" in va
+    assert "wz = 1.0e30" in va
     assert "{a0_linear * wp" not in va
 
 
@@ -134,6 +140,29 @@ def test_spectre_compiles_ac_open_loop_with_cm_ps() -> None:
     cfg = OpampConfig(a0_db=70.0, gbw_hz=2.0e6, cmrr_db=85.0, psrr_db=75.0)
     netlist = _render_spectre_template("ac_open_loop.scs", cfg)
     completed = _run_spectre_compile(netlist, label="ac_open_loop")
+    _assert_spectre_compile_ok(completed)
+
+
+def test_spectre_ac_netlist_passes_fp2_fz() -> None:
+    """Rendered Spectre AC deck wires optional fp2_hz and fz_hz into the VA instance."""
+    cfg = OpampConfig(a0_db=70.0, gbw_hz=2.0e6, fp2_hz=120.0e6, fz_hz=25.0e6)
+    netlist = _render_spectre_template("ac_open_loop.scs", cfg)
+    assert "parameters fp2_hz=120000000" in netlist or "parameters fp2_hz=1.2e8" in netlist
+    assert "FP2_HZ=fp2_hz" in netlist
+    assert "FZ_HZ=fz_hz" in netlist
+
+
+def test_spectre_compiles_ac_open_loop_with_fp2_fz() -> None:
+    """Spectre AHDL compile succeeds when fp2_hz and fz_hz are non-zero."""
+    cfg = OpampConfig(
+        a0_db=70.0,
+        gbw_hz=2.0e6,
+        fp2_hz=100.0e6,
+        fz_hz=20.0e6,
+        cmrr_db=85.0,
+    )
+    netlist = _render_spectre_template("ac_open_loop.scs", cfg)
+    completed = _run_spectre_compile(netlist, label="ac_open_loop_fp2_fz")
     _assert_spectre_compile_ok(completed)
 
 

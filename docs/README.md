@@ -17,8 +17,8 @@ Index for the **opamp-model** package (voltage op-amp, TIA, and Gm macromodels; 
 | Engine | AC / STB | Noise | PSRR | Slew / THD |
 | --- | --- | --- | --- | --- |
 | **python** | Full macromodel | Full macromodel | Full macromodel | Full macromodel |
-| **ngspice** | Parsed `wrdata` Bode | Open-loop `.noise` + AC; flicker from config or VA | Python macromodel | Not run in batch |
-| **spectre** | PSF Bode when available | PSF `.noise` + VA `flicker_noise` | Python macromodel | Not run in batch |
+| **ngspice** | Parsed `wrdata` Bode | Hybrid: SPICE AC × `OpampNoiseConfig` | Python macromodel | Not run in batch |
+| **spectre** | PSF Bode (`spectre_psf.py`) | Hybrid: PSF AC × `OpampNoiseConfig` | Python macromodel | Not run in batch |
 
 Run all benches:
 
@@ -44,10 +44,18 @@ See [MODEL.md — Noise](MODEL.md#noise).
 
 The pre-paper pair `en_flicker_at_1hz_v_per_sqrt_hz` + `en_flicker_corner_hz` (scale-factor form) remains supported as aliases during migration. New benches and `golden_metrics.yaml` prefer **`en_flicker_1hz`** (true density at 1 Hz) and **`en_flicker_ef`** (exponent `EF`).
 
+## Still hybrid / python-only
+
+| Area | Status |
+| --- | --- |
+| PSRR | Python macromodel on all engines (`python_macromodel`) |
+| TIA / Gm AC | Python macromodel on all engines |
+| ngspice / Spectre noise | `hybrid_noise_merge` (SPICE AC gain × config `en_in`) |
+| Slew / THD | `python_macromodel` in batch; manual ngspice/Spectre TRAN stubs tag `tran_scaffold` |
+
+`compare_engines.py` reports cross-engine spread and marks parity **n/a** when metrics share a non-comparable `source`. Optional `golden_metrics.yaml` reference column only.
+
 ## Planned work
 
-Tracked in [metrics_catalog.md](metrics_catalog.md) as **planned**:
-
-- TIA / Gm closed-loop models and `run_tia_*.py` / `run_gm_*.py` benches
-- `compare_engines.py` (cross-engine spread vs `golden_metrics.yaml`)
 - Full ngspice controlled-source noise transfer (remove post-merge flicker where VA supplies it)
+- Spectre/ngspice PSRR and full SPICE TRAN netlists

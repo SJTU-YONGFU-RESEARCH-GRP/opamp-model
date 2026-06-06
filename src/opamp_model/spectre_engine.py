@@ -12,18 +12,23 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from opamp_model.ac import extract_gbw_phase_margin
-from opamp_model.config import OpampConfig, OpampNoiseConfig
-from opamp_model.io import package_root, write_bode_csv
+from opamp_model.ac import cmrr_from_aol_and_acm, extract_gbw_phase_margin
+from opamp_model.cm_ps import PsrrSimulationResult, psrr_db_from_transfer
+from opamp_model.config import BenchSweepConfig, GmConfig, OpampConfig, OpampNoiseConfig, TiaConfig
+from opamp_model.io import package_root, write_bode_csv, write_psrr_csv
 from opamp_model.io import log_frequency_sweep
+from opamp_model.cm_ps import CmrrSimulationResult
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.gm import GmAcSimulationResult, bode_to_gm_result
 from opamp_model.ngspice_engine import ngspice_output_noise_spectrum
+from opamp_model.tia import TiaSimulationResult, bode_to_tia_result
 from opamp_model.noise_analysis import extract_noise_metrics
 from opamp_model.spectre_psf import (
     SpectrePsfError,
     locate_ac_psf,
     locate_noise_psf,
     read_spectre_ac_from_netlists,
+    read_spectre_psrr_from_netlists,
 )
 
 
@@ -45,6 +50,10 @@ _LICENSE_FAILURE_MARKERS = (
 
 _SCS_INCLUDE = re.compile(
     r'include\s+"\./testbench/spectre/opamp_include\.scs"\s*',
+    re.IGNORECASE,
+)
+_SCS_AHDL_INCLUDE = re.compile(
+    r'ahdl_include\s+"\./veriloga/([^"]+)"\s*',
     re.IGNORECASE,
 )
 
@@ -118,12 +127,18 @@ def _format_param(value: float | int) -> str:
 
 
 def _absolutize_spectre_includes(text: str, repo_root: Path) -> str:
-    """Replace repo-relative includes with an absolute Verilog-A path.
+    """Replace repo-relative includes with absolute Verilog-A paths.
 
     Rendered netlists run from ``<output>/logs/netlists/``; relative paths break.
     """
-    va_path = (repo_root / "veriloga/configurable_opamp.va").resolve()
-    return _SCS_INCLUDE.sub(f'ahdl_include "{va_path}"\n', text)
+    opamp_va = (repo_root / "veriloga/configurable_opamp.va").resolve()
+    text = _SCS_INCLUDE.sub(f'ahdl_include "{opamp_va}"\n', text)
+
+    def _va_repl(match: re.Match[str]) -> str:
+        va_path = (repo_root / "veriloga" / match.group(1)).resolve()
+        return f'ahdl_include "{va_path}"\n'
+
+    return _SCS_AHDL_INCLUDE.sub(_va_repl, text)
 
 
 def render_spectre_ac_netlist(
@@ -138,6 +153,42 @@ def render_spectre_ac_netlist(
     overrides = {
         "a0_db": _format_param(cfg.a0_db),
         "gbw_hz": _format_param(cfg.gbw_hz),
+        "fp2_hz": _format_param(cfg.fp2_hz),
+        "fz_hz": _format_param(cfg.fz_hz),
+        "cmrr_db": _format_param(cfg.cmrr_db),
+        "rin_ohm": _format_param(cfg.rin_ohm),
+        "cin_f": _format_param(cfg.cin_f),
+        "rout_ohm": _format_param(cfg.rout_ohm),
+        "cout_f": _format_param(cfg.cout_f),
+        "f_start": _format_param(cfg.sweep.f_start_hz),
+        "f_stop": _format_param(cfg.sweep.f_stop_hz),
+        "dec": _format_param(cfg.sweep.points_per_decade),
+    }
+    for name, value in overrides.items():
+        text = re.sub(
+            rf"^parameters\s+{name}=.*$",
+            f"parameters {name}={value}",
+            text,
+            flags=re.MULTILINE,
+        )
+    return _absolutize_spectre_includes(text, root)
+
+
+def render_spectre_psrr_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    *,
+    repo_root: Path | None = None,
+) -> str:
+    """Render a Spectre PSRR netlist with supply-AC stimulus parameters."""
+    root = repo_root or package_root()
+    text = template_path.read_text(encoding="utf-8")
+    overrides = {
+        "a0_db": _format_param(cfg.a0_db),
+        "gbw_hz": _format_param(cfg.gbw_hz),
+        "cmrr_db": _format_param(cfg.cmrr_db),
+        "psrr_db": _format_param(cfg.psrr_db),
+        "psrr_pole_hz": _format_param(cfg.psrr_pole_hz),
         "rin_ohm": _format_param(cfg.rin_ohm),
         "cin_f": _format_param(cfg.cin_f),
         "rout_ohm": _format_param(cfg.rout_ohm),
@@ -358,6 +409,161 @@ def simulate_ac_spectre(
     )
 
 
+def run_spectre_ac_cm(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    template_name: str = "ac_cm.scs",
+) -> SpectreAcResult:
+    """Render and execute a Spectre common-mode AC netlist; export ACM from PSF."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(
+        render_spectre_ac_netlist(template, cfg, repo_root=repo),
+        encoding="utf-8",
+    )
+    stem = template_name.replace(".scs", "")
+    log_path = output_dir / "logs" / f"spectre_{stem}.log"
+    csv_path = output_dir / "ac_cm_bode.csv"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre CM AC failed",
+    )
+
+    try:
+        bode = read_spectre_ac_from_netlists(logs_dir, stem=stem, signal="out")
+    except SpectrePsfError as exc:
+        msg = f"Spectre CM AC PSF read failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    write_bode_csv(
+        csv_path,
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
+    raw_dir = locate_ac_psf(logs_dir, stem=stem).raw_dir
+    return SpectreAcResult(
+        netlist_path=netlist_path,
+        log_path=log_path,
+        raw_dir=raw_dir,
+        csv_path=csv_path,
+    )
+
+
+def try_cmrr_from_spectre(
+    cfg: OpampConfig,
+    output_dir: Path,
+    ac_result: AcSimulationResult,
+) -> CmrrSimulationResult | None:
+    """Derive CMRR from Spectre diff + CM AC PSF when Spectre/PSF are available."""
+    try:
+        cm_artifacts = run_spectre_ac_cm(cfg, output_dir)
+        acm = read_spectre_ac_from_netlists(
+            cm_artifacts.netlist_path.parent,
+            stem=cm_artifacts.netlist_path.stem,
+            signal="out",
+        )
+    except (SpectreNotFoundError, SpectreLicenseError, RuntimeError, SpectrePsfError):
+        return None
+    return cmrr_from_aol_and_acm(
+        ac_result["frequency_hz"],
+        ac_result["gain_db"],
+        acm["frequency_hz"],
+        acm["gain_db"],
+        source="cmrr_bench",
+    )
+
+
+@dataclass(frozen=True)
+class SpectrePsrrResult:
+    """Artifacts from a Spectre PSRR run."""
+
+    netlist_path: Path
+    log_path: Path
+    raw_dir: Path
+    csv_path: Path
+
+
+def run_spectre_psrr(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    template_name: str = "psrr.scs",
+) -> SpectrePsrrResult:
+    """Render and execute a Spectre PSRR netlist; export PSRR CSV from PSF."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(
+        render_spectre_psrr_netlist(template, cfg, repo_root=repo),
+        encoding="utf-8",
+    )
+    stem = template_name.replace(".scs", "")
+    log_path = output_dir / "logs" / f"spectre_{stem}.log"
+    csv_path = output_dir / "psrr.csv"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre PSRR failed",
+    )
+
+    try:
+        psrr_data = read_spectre_psrr_from_netlists(logs_dir, stem=stem)
+    except SpectrePsfError as exc:
+        msg = f"Spectre PSRR PSF read failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    psrr_db = psrr_db_from_transfer(psrr_data["transfer"])
+    write_psrr_csv(csv_path, psrr_data["frequency_hz"], psrr_db)
+    raw_dir = locate_ac_psf(logs_dir, stem=stem).raw_dir
+    return SpectrePsrrResult(
+        netlist_path=netlist_path,
+        log_path=log_path,
+        raw_dir=raw_dir,
+        csv_path=csv_path,
+    )
+
+
+def spectre_psrr_to_simulation_result(
+    frequency_hz: NDArray[np.float64],
+    transfer: NDArray[np.complex128],
+) -> PsrrSimulationResult:
+    """Build ``PsrrSimulationResult`` from Spectre supply-transfer PSF columns."""
+    psrr_db = psrr_db_from_transfer(transfer)
+    return PsrrSimulationResult(
+        frequency_hz=frequency_hz,
+        psrr_db=psrr_db,
+        psrr_dc_db=float(psrr_db[0]),
+    )
+
+
+def simulate_psrr_spectre(
+    cfg: OpampConfig,
+    output_dir: Path,
+) -> PsrrSimulationResult:
+    """Run PSRR bench in Spectre and return supply-transfer data parsed from PSF."""
+    artifacts = run_spectre_psrr(cfg, output_dir)
+    psrr_data = read_spectre_psrr_from_netlists(
+        artifacts.netlist_path.parent,
+        stem=artifacts.netlist_path.stem,
+    )
+    return spectre_psrr_to_simulation_result(
+        psrr_data["frequency_hz"],
+        psrr_data["transfer"],
+    )
+
+
 @dataclass(frozen=True)
 class SpectreNoiseResult:
     """Artifacts from a Spectre noise analysis run."""
@@ -438,6 +644,222 @@ def simulate_noise_spectre(
         frequency_hz=frequency_hz,
         noise_v_per_sqrt_hz=spectrum,
         metrics=metrics,
+    )
+
+
+def render_spectre_tia_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    tia: TiaConfig,
+    *,
+    repo_root: Path | None = None,
+) -> str:
+    """Render a Spectre TIA AC netlist with CLI macromodel settings."""
+    root = repo_root or package_root()
+    text = template_path.read_text(encoding="utf-8")
+    overrides = {
+        "rf_ohm": _format_param(tia.rf_ohm),
+        "cf_f": _format_param(tia.cf_f),
+        "cs_f": _format_param(tia.cs_f),
+        "a0_db": _format_param(cfg.a0_db),
+        "gbw_hz": _format_param(cfg.gbw_hz),
+        "rin_ohm": _format_param(cfg.rin_ohm),
+        "cin_f": _format_param(cfg.cin_f),
+        "rout_ohm": _format_param(cfg.rout_ohm),
+        "cout_f": _format_param(cfg.cout_f),
+        "f_start": _format_param(cfg.sweep.f_start_hz),
+        "f_stop": _format_param(cfg.sweep.f_stop_hz),
+        "dec": _format_param(cfg.sweep.points_per_decade),
+    }
+    for name, value in overrides.items():
+        text = re.sub(
+            rf"^parameters\s+{name}=.*$",
+            f"parameters {name}={value}",
+            text,
+            flags=re.MULTILINE,
+        )
+    return _absolutize_spectre_includes(text, root)
+
+
+def run_spectre_tia_ac(
+    cfg: OpampConfig,
+    tia: TiaConfig,
+    output_dir: Path,
+    *,
+    template_name: str = "run_tia_ac.scs",
+) -> SpectreAcResult:
+    """Render and execute a Spectre TIA AC netlist; export Zt CSV from PSF."""
+    if not tia.current_input:
+        msg = "Spectre TIA bench supports current-input mode only; use --simulator python."
+        raise ValueError(msg)
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(
+        render_spectre_tia_netlist(template, cfg, tia, repo_root=repo),
+        encoding="utf-8",
+    )
+    stem = template_name.replace(".scs", "")
+    log_path = output_dir / "logs" / "spectre_tia_ac.log"
+    csv_path = output_dir / "tia_zt.csv"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre TIA AC failed",
+    )
+
+    try:
+        bode = read_spectre_ac_from_netlists(logs_dir, stem=stem, signal="out")
+    except SpectrePsfError as exc:
+        msg = f"Spectre TIA AC PSF read failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    result = bode_to_tia_result(
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
+    from opamp_model.io import write_tia_csv
+
+    write_tia_csv(
+        csv_path,
+        result["frequency_hz"],
+        result["zt_ohm"],
+        result["zt_db"],
+        result["zt_phase_deg"],
+    )
+    raw_dir = locate_ac_psf(logs_dir, stem=stem).raw_dir
+    return SpectreAcResult(
+        netlist_path=netlist_path,
+        log_path=log_path,
+        raw_dir=raw_dir,
+        csv_path=csv_path,
+    )
+
+
+def simulate_tia_ac_spectre(
+    cfg: OpampConfig,
+    tia: TiaConfig,
+    output_dir: Path,
+    noise: OpampNoiseConfig | None = None,
+) -> TiaSimulationResult:
+    """Run TIA AC in Spectre and return transimpedance curves from PSF."""
+    _ = noise
+    artifacts = run_spectre_tia_ac(cfg, tia, output_dir)
+    bode = read_spectre_ac_from_netlists(
+        artifacts.netlist_path.parent,
+        stem=artifacts.netlist_path.stem,
+        signal="out",
+    )
+    return bode_to_tia_result(
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
+
+
+def render_spectre_gm_netlist(
+    template_path: Path,
+    gm_cfg: GmConfig,
+    *,
+    sweep: BenchSweepConfig | None = None,
+    repo_root: Path | None = None,
+) -> str:
+    """Render a Spectre Gm loaded AC netlist."""
+    root = repo_root or package_root()
+    bench = sweep or BenchSweepConfig()
+    text = template_path.read_text(encoding="utf-8")
+    overrides = {
+        "gm_s": _format_param(gm_cfg.gm_s),
+        "rout_ohm": _format_param(gm_cfg.rout_ohm),
+        "cout_f": _format_param(gm_cfg.cout_f),
+        "f_start": _format_param(bench.f_start_hz),
+        "f_stop": _format_param(bench.f_stop_hz),
+        "dec": _format_param(bench.points_per_decade),
+    }
+    for name, value in overrides.items():
+        text = re.sub(
+            rf"^parameters\s+{name}=.*$",
+            f"parameters {name}={value}",
+            text,
+            flags=re.MULTILINE,
+        )
+    return _absolutize_spectre_includes(text, root)
+
+
+def run_spectre_gm_ac(
+    gm_cfg: GmConfig,
+    output_dir: Path,
+    *,
+    sweep: BenchSweepConfig | None = None,
+    template_name: str = "run_gm_ac.scs",
+) -> SpectreAcResult:
+    """Render and execute a Spectre Gm AC netlist; export Bode CSV from PSF."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(
+        render_spectre_gm_netlist(template, gm_cfg, sweep=sweep, repo_root=repo),
+        encoding="utf-8",
+    )
+    stem = template_name.replace(".scs", "")
+    log_path = output_dir / "logs" / "spectre_gm_ac.log"
+    csv_path = output_dir / "gm_ac_bode.csv"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre Gm AC failed",
+    )
+
+    try:
+        bode = read_spectre_ac_from_netlists(logs_dir, stem=stem, signal="iout")
+    except SpectrePsfError as exc:
+        msg = f"Spectre Gm AC PSF read failed: {exc}"
+        raise RuntimeError(msg) from exc
+
+    write_bode_csv(
+        csv_path,
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
+    )
+    raw_dir = locate_ac_psf(logs_dir, stem=stem).raw_dir
+    return SpectreAcResult(
+        netlist_path=netlist_path,
+        log_path=log_path,
+        raw_dir=raw_dir,
+        csv_path=csv_path,
+    )
+
+
+def simulate_gm_ac_spectre(
+    gm_cfg: GmConfig,
+    output_dir: Path,
+    noise: OpampNoiseConfig | None = None,
+    *,
+    sweep: BenchSweepConfig | None = None,
+) -> GmAcSimulationResult:
+    """Run Gm loaded AC in Spectre and return Bode data parsed from PSF."""
+    _ = noise
+    artifacts = run_spectre_gm_ac(gm_cfg, output_dir, sweep=sweep)
+    bode = read_spectre_ac_from_netlists(
+        artifacts.netlist_path.parent,
+        stem=artifacts.netlist_path.stem,
+        signal="iout",
+    )
+    return bode_to_gm_result(
+        gm_cfg,
+        bode["frequency_hz"],
+        bode["gain_db"],
+        bode["phase_deg"],
     )
 
 

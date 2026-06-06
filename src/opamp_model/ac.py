@@ -179,8 +179,13 @@ def cmrr_from_open_loop(
     gain_db: NDArray[np.float64],
     *,
     cmrr_linear: float,
+    source: str = "hybrid_cmrr",
 ) -> CmrrSimulationResult:
-    """Build a CMRR result bundle from an existing open-loop Bode sweep."""
+    """Build a CMRR result bundle from an existing open-loop Bode sweep.
+
+    Derives ACM as ``Aol / CMRR_linear`` (constant CMRR). Use ``source``
+    ``hybrid_cmrr`` when AOL comes from a simulator without a CM bench.
+    """
     acm_db, cmrr_db, cmrr_dc_db = extract_cmrr(
         frequency_hz,
         gain_db,
@@ -191,6 +196,32 @@ def cmrr_from_open_loop(
         acm_db=acm_db,
         cmrr_db=cmrr_db,
         cmrr_dc_db=cmrr_dc_db,
+        source=source,
+    )
+
+
+def cmrr_from_aol_and_acm(
+    frequency_hz_aol: NDArray[np.float64],
+    aol_db: NDArray[np.float64],
+    frequency_hz_acm: NDArray[np.float64],
+    acm_db: NDArray[np.float64],
+    *,
+    source: str = "cmrr_bench",
+) -> CmrrSimulationResult:
+    """Build CMRR from measured open-loop and common-mode Bode sweeps.
+
+    ``CMRR(f) = Aol(f) - ACM(f)`` in dB; ACM is interpolated onto the AOL grid.
+    """
+    log_f = np.log10(np.maximum(frequency_hz_aol.astype(np.float64), 1.0e-30))
+    log_acm = np.log10(np.maximum(frequency_hz_acm.astype(np.float64), 1.0e-30))
+    acm_interp = np.interp(log_f, log_acm, acm_db.astype(np.float64))
+    cmrr_db = (aol_db.astype(np.float64) - acm_interp).astype(np.float64)
+    return CmrrSimulationResult(
+        frequency_hz=frequency_hz_aol.astype(np.float64),
+        acm_db=acm_interp,
+        cmrr_db=cmrr_db,
+        cmrr_dc_db=float(cmrr_db[0]) if len(cmrr_db) else float("nan"),
+        source=source,
     )
 
 

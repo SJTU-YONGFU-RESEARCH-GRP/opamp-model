@@ -1,0 +1,38 @@
+* PSRR testbench — supply AC on VDD, differential inputs quiet.
+*
+* Target (same as cm_ps.py / configurable_opamp.va PS path):
+*   H_ps(s) = (1/PSRR_LINEAR) / (1 + s/wp_psrr),  wp_psrr = 2*pi*PSRR_POLE_HZ
+*
+* ngspice realization (ideal VCVS + single-pole RC):
+*   V(n1) = (1/PSRR_LINEAR) * V(vdd)
+*   V(n2) = V(n1) / (1 + s*Rps*Cps),  Rps*Cps = 1/wp_psrr
+*   V(out) = V(n2)
+
+.param psrr_db=80
+.param psrr_pole_hz=100
+.param rout_ohm=100
+.param psrr_linear=PLACEHOLDER_PSRR_LINEAR
+.param psrr_inv=PLACEHOLDER_PSRR_INV
+.param wp_psrr_rad_s=PLACEHOLDER_WP_PSRR
+.param rps_ohm=PLACEHOLDER_RPS
+.param cps_f=PLACEHOLDER_CPS
+
+VDD vdd 0 DC 1.8 AC 1
+VSS vss 0 DC 0
+VINP inp 0 DC 0.9 AC 0
+VINN inn 0 DC 0.9 AC 0
+
+Eps n1 0 vdd 0 {psrr_inv}
+Rps n1 n2 {rps_ohm}
+Cps n2 0 {cps_f}
+Eout out 0 n2 0 1
+ROUT out 0 {rout_ohm}
+
+.ac dec PLACEHOLDER_DEC PLACEHOLDER_FSTART PLACEHOLDER_FSTOP
+.control
+run
+set wr_singlescale
+wrdata psrr.raw frequency vm(out)
+.endc
+
+.end

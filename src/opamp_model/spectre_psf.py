@@ -173,6 +173,46 @@ def read_spectre_ac_from_netlists(
     return read_spectre_ac_psf(paths.psf_path, signal=signal)
 
 
+def read_spectre_supply_transfer_psf(
+    psf_path: Path,
+    *,
+    output_signal: str = "out",
+    supply_signal: str = "vdd",
+) -> dict[str, NDArray[np.float64]]:
+    """Read supply-to-output AC transfer ``H_ps = V(out)/V(vdd)`` from PSF.
+
+    The PSRR bench drives ``vdd`` with unit AC magnitude and keeps differential
+    inputs quiet, so ``out`` alone is sufficient when ``supply_signal`` is absent.
+    """
+    frequency_hz, out_values = _complex_trace_data(psf_path, output_signal)
+    try:
+        _, vdd_values = _complex_trace_data(psf_path, supply_signal)
+        denom = np.maximum(np.abs(vdd_values), 1.0e-30)
+        transfer = (out_values / vdd_values).astype(np.complex128)
+    except SpectrePsfError:
+        transfer = out_values.astype(np.complex128)
+    return {
+        "frequency_hz": frequency_hz,
+        "transfer": transfer,
+    }
+
+
+def read_spectre_psrr_from_netlists(
+    netlists_dir: Path,
+    *,
+    stem: str = "psrr",
+    output_signal: str = "out",
+    supply_signal: str = "vdd",
+) -> dict[str, NDArray[np.float64]]:
+    """Locate and parse PSRR supply transfer under a Spectre netlist run directory."""
+    paths = locate_ac_psf(netlists_dir, stem=stem)
+    return read_spectre_supply_transfer_psf(
+        paths.psf_path,
+        output_signal=output_signal,
+        supply_signal=supply_signal,
+    )
+
+
 def locate_noise_psf(netlists_dir: Path, stem: str = "noise_open_loop") -> SpectreAcPsfPaths:
     """Locate PSF files for a noise run under ``output_dir/logs/netlists/``."""
     raw_dir = find_spectre_raw_dir(netlists_dir, stem)

@@ -19,6 +19,7 @@ from opamp_model.cli_helpers import (
 )
 from opamp_model.io import package_root, write_tia_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
+from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_tia_ac_ngspice
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
@@ -26,6 +27,7 @@ from opamp_model.report import (
     write_tia_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_tia_ac_spectre
 from opamp_model.tia import plot_zt, simulate_tia_ac
 
 
@@ -50,9 +52,19 @@ def main() -> None:
     log.write_header("tia_ac", resolve_engine_label(args.simulator), cfg, noise)
     log_run_context(log)
 
-    if args.simulator != "python":
-        log.write("TIA AC: Python macromodel (Spectre/ngspice netlist stub when used).")
-    result = simulate_tia_ac(cfg, tia, noise)
+    try:
+        if args.simulator == "python":
+            result = simulate_tia_ac(cfg, tia, noise)
+        elif args.simulator == "ngspice":
+            result = simulate_tia_ac_ngspice(cfg, tia, out_dir, noise)
+        elif args.simulator == "spectre":
+            result = simulate_tia_ac_spectre(cfg, tia, out_dir, noise)
+        else:
+            raise ValueError(f"Unknown simulator: {args.simulator}")
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
+        log.write(str(exc))
+        log.close()
+        raise SystemExit(str(exc)) from exc
 
     csv_path = out_dir / "tia_zt.csv"
     write_tia_csv(

@@ -1,22 +1,51 @@
-* TIA closed-loop AC stub (optional ngspice bench).
-* Python macromodel supplies Zt(f) metrics until ngspice VA path is wired.
+* TIA closed-loop AC — ngspice one-pole macromodel + Rf||Cf feedback.
+*
+* Transimpedance Zt = V(out) with IIN AC magnitude 1 A (output voltage in ohms).
+* Matches Python tia.py / configurable_tia.va (current-input inverting TIA).
 
-.title TIA AC stub
-.param rf_ohm=100k cf_f=100f
+.param rf_ohm=100k
+.param cf_f=100f
+.param cs_f=0
+.param a0_db=80
+.param gbw_hz=10Meg
+.param rin_ohm=1e12
+.param cin_f=1p
+.param cshunt_f=1p
+.param rout_ohm=100
+.param cout_f=2p
+.param a0_linear=PLACEHOLDER_A0
+.param wp_rad_s=PLACEHOLDER_WP
+.param rlp_ohm=PLACEHOLDER_RLP
+.param clp_f=PLACEHOLDER_CLP
+.param f_start=1
+.param f_stop=100Meg
+.param dec=10
 
 VDD vdd 0 DC 1.8
 VSS vss 0 DC 0
 VCM inp 0 DC 0.9
-RLOAD out 0 100
-
-* Placeholder: replace with configurable_tia when ngspice AHDL is linked.
-RIN inn 0 1e12
-RF out inn {rf_ohm}
-CF out inn {cf_f}
 
 IIN iin 0 DC 0 AC 1
 RINJ inn iin 1
 
-.ac dec 10 1 100Meg
-.print ac vdb(out) vp(out)
+RINN inn 0 {rin_ohm}
+CINN inn 0 {cshunt_f}
+
+RF out inn {rf_ohm}
+CF out inn {cf_f}
+
+Eaux n1 0 inp inn {a0_linear}
+Rlp n1 n2 {rlp_ohm}
+Clp n2 0 {clp_f}
+Eout out 0 n2 0 1
+ROUT out 0 {rout_ohm}
+COUT out 0 {cout_f}
+
+.ac dec {dec} {f_start} {f_stop}
+.control
+run
+set wr_singlescale
+wrdata tia_zt.raw frequency vdb(out) vp(out)
+.endc
+
 .end

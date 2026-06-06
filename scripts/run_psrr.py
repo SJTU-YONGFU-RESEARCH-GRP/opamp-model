@@ -18,6 +18,12 @@ from opamp_model.cli_helpers import (
 from opamp_model.cm_ps import plot_psrr, simulate_psrr
 from opamp_model.io import package_root, write_psrr_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
+from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_psrr_ngspice
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_psrr_spectre,
+)
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
@@ -45,9 +51,19 @@ def main() -> None:
     log.write_header("psrr", resolve_engine_label(args.simulator), cfg, noise)
     log_run_context(log)
 
-    if args.simulator != "python":
-        log.write("PSRR bench: Python macromodel (Spectre/ngspice stub when used).")
-    result = simulate_psrr(cfg)
+    try:
+        if args.simulator == "python":
+            result = simulate_psrr(cfg)
+        elif args.simulator == "ngspice":
+            result = simulate_psrr_ngspice(cfg, out_dir)
+        elif args.simulator == "spectre":
+            result = simulate_psrr_spectre(cfg, out_dir)
+        else:
+            raise ValueError(f"Unknown simulator: {args.simulator}")
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
+        log.write(str(exc))
+        log.close()
+        raise SystemExit(str(exc)) from exc
 
     csv_path = out_dir / "psrr.csv"
     write_psrr_csv(csv_path, result["frequency_hz"], result["psrr_db"])

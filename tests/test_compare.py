@@ -20,6 +20,7 @@ from opamp_model.compare import (
     load_engine_metrics,
     write_compare_report,
 )
+from opamp_model.cm_ps import simulate_psrr
 from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.io import package_root
 from opamp_model.metrics import build_metrics_report
@@ -47,6 +48,7 @@ def _minimal_report(
     ac = simulate_ac(cfg)
     stb = simulate_ac(cfg)
     noise_result = simulate_noise(cfg, noise)
+    psrr_result = simulate_psrr(cfg)
     report = build_metrics_report(
         cfg,
         noise,
@@ -54,6 +56,9 @@ def _minimal_report(
         ac_result=ac,
         stb_result=stb,
         noise_result=noise_result,
+        psrr_result=psrr_result,
+        slew_pos_measured=slew_pos_vps,
+        slew_neg_measured=-slew_pos_vps if slew_pos_vps is not None else None,
     )
     report["ac"]["a0_db"]["value"] = a0_db
     report["ac"]["gbw_hz"]["value"] = gbw_hz
@@ -61,10 +66,7 @@ def _minimal_report(
     report["cmrr_psrr"]["cmrr_db"]["value"] = cmrr_db
     report["cmrr_psrr"]["psrr_db"]["value"] = psrr_db
     report["noise"]["integrated_noise_rms_v"]["value"] = integrated_noise_rms_v
-    if slew_pos_vps is not None:
-        report["large_signal"]["slew_pos_vps"]["value"] = slew_pos_vps
-        report["large_signal"]["slew_pos_vps"]["status"] = "reported"
-    else:
+    if slew_pos_vps is None:
         report["large_signal"]["slew_pos_vps"]["value"] = None
     return report
 
@@ -130,8 +132,8 @@ def test_compare_fails_pm_spread(tmp_path: Path) -> None:
     assert any("Phase margin" in f for f in result.failures)
 
 
-def test_compare_fails_noise_spread(tmp_path: Path) -> None:
-    """Integrated noise RMS spread above 2% fails."""
+def test_compare_skips_noise_spread_check(tmp_path: Path) -> None:
+    """Integrated noise parity is n/a when hybrid/python sources are present."""
     base = 0.01
     high = base * (1.0 + TOLERANCE_NOISE_REL + 0.02)
     _write_metrics(tmp_path / "python" / "opamp_metrics.json", _minimal_report(engine="python"))
@@ -141,8 +143,9 @@ def test_compare_fails_noise_spread(tmp_path: Path) -> None:
     )
     _write_metrics(tmp_path / "spectre" / "opamp_metrics.json", _minimal_report(engine="spectre"))
     result = compare_engines(tmp_path)
-    assert not result.passed
-    assert any("Integrated noise" in f for f in result.failures)
+    noise_row = next(r for r in result.rows if r.spec.key == "integrated_noise_rms_v")
+    assert noise_row.parity_skipped
+    assert result.passed
 
 
 def test_golden_column_optional(tmp_path: Path) -> None:
@@ -176,6 +179,47 @@ def test_compare_table_includes_limit_column(tmp_path: Path) -> None:
     assert "Limit" in text
     assert f"{TOLERANCE_MODULE_REL * 100:.0g}%" in text
     assert f"{TOLERANCE_A0_DB:g} dB" in text
+
+
+def test_compare_skips_slew_parity_when_python_tran(tmp_path: Path) -> None:
+    """Slew spread is n/a when engines share python-only / TRAN-scaffold sources."""
+    for engine in ("python", "ngspice", "spectre"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path)
+    slew_rows = [r for r in result.rows if r.spec.key in ("slew_pos_vps", "slew_neg_vps")]
+    assert slew_rows
+    assert all(r.parity_skipped for r in slew_rows)
+    text = format_compare_table(result)
+    assert "n/a" in text
+    assert "Parity skipped" in text
+
+
+def test_compare_skips_psrr_parity(tmp_path: Path) -> None:
+    """PSRR is n/a until ngspice/Spectre run native PSRR benches."""
+    for engine in ("python", "ngspice"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path, engines=("python", "ngspice"))
+    psrr_row = next(r for r in result.rows if r.spec.key == "psrr_db")
+    assert psrr_row.parity_skipped
+    assert psrr_row.within_tolerance is None
+
+
+def test_compare_skips_noise_when_hybrid_or_python(tmp_path: Path) -> None:
+    """Integrated noise parity is n/a when any engine uses hybrid/python sources."""
+    for engine in ("python", "ngspice", "spectre"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path)
+    noise_row = next(r for r in result.rows if r.spec.key == "integrated_noise_rms_v")
+    assert noise_row.parity_skipped
 
 
 def test_write_compare_report_markdown(tmp_path: Path) -> None:

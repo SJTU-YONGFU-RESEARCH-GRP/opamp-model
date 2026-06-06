@@ -1,8 +1,8 @@
-// PSRR compile/AC testbench (Cadence Spectre).
-// Supply AC on VDD; differential inputs quiet. Metrics from run_psrr.py (Python) until PSF parser.
+// PSRR AC testbench (Cadence Spectre).
+// Supply AC on VDD; differential inputs quiet. PSRR parsed from PSF by run_psrr.py.
 //
 // Run via:
-//   python scripts/run_psrr.py --output-dir outputs/spectre
+//   python scripts/run_psrr.py --simulator spectre --output-dir outputs/spectre
 
 simulator lang=spectre
 

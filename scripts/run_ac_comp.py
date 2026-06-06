@@ -96,11 +96,12 @@ def main() -> None:
     )
     report = preserve_metrics_sections(report, previous)
     if previous and previous.get("ac"):
-        ac_entries = merge_ac_comp_entries(previous["ac"], comp)
+        ac_entries = merge_ac_comp_entries(previous["ac"], comp, engine=args.simulator)
     else:
         ac_entries = merge_ac_comp_entries(
-            build_ac_metric_entries(result["metrics"]),
+            build_ac_metric_entries(result["metrics"], engine=args.simulator),
             comp,
+            engine=args.simulator,
         )
     merged = dict(report)
     merged["ac"] = ac_entries

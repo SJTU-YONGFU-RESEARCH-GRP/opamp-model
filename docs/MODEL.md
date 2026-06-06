@@ -221,10 +221,14 @@ All engines must implement the **same** equations in this document; none is auth
 | AC open-loop | Macromodel | ``ac_open_loop.cir``: ideal VCVS + RC with ``Rlp·Clp=1/wp`` (one-pole, same as ``laplace_nd``); ``wrdata`` parsed | ``ac_open_loop.scs`` → PSF ``*.raw/ac.ac`` via ``spectre_psf.py`` |
 | STB loop gain | ``beta * A_open`` | ``stb_loop.cir`` (same one-pole macromodel); ``loop_beta`` applied in ``run_stb.py`` | Same AC PSF path; ``loop_beta`` in ``run_stb.py`` |
 | Noise | Macromodel spectrum | ``noise_open_loop.cir`` (``.noise`` + AC); VA flicker when enabled | ``noise_open_loop.scs`` (``.noise`` + PSF); VA ``flicker_noise`` when enabled |
-| PSRR | Macromodel | Python only (``psrr.scs`` stub) | Python only (``psrr.scs`` stub) |
-| Slew / THD | TRAN macromodel | Not wired | Not wired |
+| PSRR | Macromodel | Python macromodel (``psrr.scs`` stub) | Python macromodel (``psrr.scs`` stub) |
+| Slew / THD | TRAN macromodel | Python only in batch; manual TRAN stub + Python curves | Python only in batch; manual TRAN stub + Python curves |
+| TIA AC | ``simulate_tia_ac`` | Python macromodel | Python macromodel |
+| Gm AC | ``simulate_gm_ac`` | Python macromodel | Python macromodel |
 
-**Scaffolding (temporary):** Some benches may still fall back to Python when PSF or ngspice artifacts are missing; see engine code. Spectre AC/STB read Bode from PSF when available (``src/opamp_model/spectre_psf.py``).
+**Hybrid / python-only (not cross-engine parity):** PSRR, TIA, and Gm use the Python macromodel on all engines today. ngspice/Spectre noise merges SPICE AC gain with ``OpampNoiseConfig`` input-referred density (``hybrid_noise_merge``). TRAN slew/THD are **python-only** in ``run_all_simulations.sh``; manual ngspice/Spectre runs may still invoke TRAN stubs that tag metrics ``tran_scaffold``.
+
+Spectre AC/STB Bode is parsed from PSF (``src/opamp_model/spectre_psf.py``). ngspice AC/STB uses ``wrdata`` (``ngspice_wrdata``).
 
 ### Noise engine limitations
 
@@ -236,7 +240,7 @@ All engines must implement the **same** equations in this document; none is auth
 
 Spectre and ngspice both derive output-referred noise from the companion AC sweep and ``OpampNoiseConfig`` input-referred density. The Python noise bench remains the reference macromodel for ``--simulator python`` only.
 
-``docs/golden_metrics.yaml`` holds optional transistor-level reference targets for future ``compare_engines.py``; it is **not** an engine truth file.
+``docs/golden_metrics.yaml`` holds optional transistor-level reference targets for ``compare_engines.py`` (reference column only); it is **not** an engine truth file. Peer spread tolerances skip metrics whose ``source`` is python-only, hybrid, or TRAN-scaffold on all engines.
 
 ## Verilog-A modules
 
@@ -285,11 +289,11 @@ f_c = flicker_corner_frequency(noise)
 
 Default frequency sweep: ``BenchSweepConfig`` — 1 Hz–100 MHz, 10 points/decade (see [bench_spec.md](bench_spec.md)).
 
-## Planned (TIA / Gm)
+## TIA / Gm (Python)
 
 | Model | Target equation | Python status |
 | --- | --- | --- |
-| TIA closed-loop | ``Z_t(s)`` from ``OpampConfig`` + ``TiaConfig`` | ``NotImplementedError`` in ``tia.py`` |
-| Gm | ``I_{out} = g_m V_{diff}`` | ``NotImplementedError`` in ``gm.py`` |
+| TIA closed-loop | ``Z_t(s)`` from ``OpampConfig`` + ``TiaConfig`` | ``simulate_tia_ac`` in ``tia.py``; ``run_tia_ac.py`` |
+| Gm | ``I_{out} = g_m V_{diff}`` | ``simulate_gm_ac`` in ``gm.py``; ``run_gm_ac.py`` |
 
-Bench catalog for TIA/Gm: [bench_spec.md](bench_spec.md) (planned scripts).
+ngspice/Spectre netlists exist as stubs; benches still use the Python macromodel. See [bench_spec.md](bench_spec.md).

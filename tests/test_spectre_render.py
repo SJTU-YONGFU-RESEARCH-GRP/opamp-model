@@ -19,6 +19,18 @@ def test_render_ac_netlist_contains_parameters() -> None:
     assert str(package_root() / "veriloga/configurable_opamp.va") in text
 
 
+def test_render_ac_netlist_includes_fp2_fz_parameters() -> None:
+    """Rendered Spectre AC netlist passes fp2_hz, fz_hz, and cmrr_db."""
+    cfg = OpampConfig(a0_db=70.0, gbw_hz=2.0e6, fp2_hz=50.0e6, fz_hz=8.0e6, cmrr_db=88.0)
+    template = package_root() / "testbench" / "spectre" / "ac_open_loop.scs"
+    text = render_spectre_ac_netlist(template, cfg)
+    assert "parameters fp2_hz=" in text
+    assert "parameters fz_hz=" in text
+    assert "parameters cmrr_db=88" in text
+    assert "FP2_HZ=fp2_hz" in text
+    assert "FZ_HZ=fz_hz" in text
+
+
 def test_veriloga_laplace_uses_array_variables() -> None:
     """Spectre requires laplace_nd coeffs in array variables, not inline expressions."""
     va = (package_root() / "veriloga/configurable_opamp.va").read_text(encoding="utf-8")

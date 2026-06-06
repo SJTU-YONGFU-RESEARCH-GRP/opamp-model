@@ -1,7 +1,7 @@
-// Open-loop AC Bode testbench (Cadence Spectre).
+// Common-mode AC Bode testbench (Cadence Spectre).
 //
-// Run via:
-//   python scripts/run_ac.py --spectre --output-dir outputs/spectre
+// Stimulus: zero differential AC; common-mode AC on inn (inp follows inn).
+// VA CM path: laplace_nd(0.5*(V(inp)+V(inn)), cm_numer, cm_denom).
 
 simulator lang=spectre
 
@@ -24,9 +24,8 @@ parameters dec=10
 
 VDD (vdd 0) vsource dc=1.8
 VSS (vss 0) vsource dc=0.0
-VCM (inn 0) vsource dc=0.9 type=dc
-
-VAC (inp 0) vsource dc=0.9 type=dc mag=1 phase=0
+VCM (inn 0) vsource dc=0.9 type=dc mag=1 phase=0
+VDIFF (inp inn) vsource dc=0 type=dc mag=0 phase=0
 
 XOP (inp inn out vdd vss) configurable_opamp \
     A0_DB=a0_db GBW_HZ=gbw_hz FP2_HZ=fp2_hz FZ_HZ=fz_hz \

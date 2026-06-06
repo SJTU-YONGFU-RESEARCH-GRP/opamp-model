@@ -14,8 +14,18 @@ from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.noise import flicker_corner_frequency, flicker_voltage_density
 from opamp_model.impedance import zin_diff, zout as zout_model
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.gm import GmAcSimulationResult, GmMetrics
 from opamp_model.tia import TiaMetrics, TiaSimulationResult
 from opamp_model.tran import ThdMetrics, is_thd_ideal
+
+# Sources that do not represent independent SPICE/Spectre extraction for a metric.
+PARITY_SKIP_SOURCES = frozenset(
+    {
+        "python_macromodel",
+        "tran_scaffold",
+        "hybrid_noise_merge",
+    }
+)
 
 
 class MetricEntry(TypedDict):
@@ -39,6 +49,7 @@ class OpampMetricsReport(TypedDict):
     noise: dict[str, MetricEntry]
     large_signal: dict[str, MetricEntry]
     tia: dict[str, MetricEntry]
+    gm: dict[str, MetricEntry]
 
 
 def _metric(
@@ -72,22 +83,63 @@ def _config_snapshot(cfg: OpampConfig) -> dict[str, float | int]:
     }
 
 
-def build_ac_metric_entries(ac: AcMetrics) -> dict[str, MetricEntry]:
+def _ac_metric_source(engine: str) -> str:
+    """Provenance for AC/STB scalars parsed or simulated per engine."""
+    if engine == "python":
+        return "python_macromodel"
+    if engine == "ngspice":
+        return "ngspice_wrdata"
+    if engine == "spectre":
+        return "spectre_psf"
+    return "python_macromodel"
+
+
+def _psrr_metric_source(engine: str) -> str:
+    """Provenance for simulated PSRR scalars."""
+    if engine == "python":
+        return "psrr_macromodel"
+    if engine == "ngspice":
+        return "ngspice_psrr"
+    if engine == "spectre":
+        return "spectre_psrr"
+    return "psrr_macromodel"
+
+
+def _noise_metric_source(engine: str) -> str:
+    """Provenance for simulated noise scalars."""
+    if engine == "python":
+        return "python_macromodel"
+    if engine in ("ngspice", "spectre"):
+        return "hybrid_noise_merge"
+    return "python_macromodel"
+
+
+def _tran_metric_source(engine: str) -> str:
+    """Provenance for TRAN slew/THD scalars."""
+    if engine == "python":
+        return "python_macromodel"
+    if engine in ("ngspice", "spectre"):
+        return "tran_scaffold"
+    return "python_macromodel"
+
+
+def build_ac_metric_entries(ac: AcMetrics, *, engine: str = "python") -> dict[str, MetricEntry]:
     """Map AC/STB extraction results to report entries."""
+    source = _ac_metric_source(engine)
     return {
-        "a0_db": _metric(ac["a0_db"], unit="dB", status="reported", source="ac_bode"),
-        "gbw_hz": _metric(ac["gbw_hz"], unit="Hz", status="reported", source="ac_bode"),
+        "a0_db": _metric(ac["a0_db"], unit="dB", status="reported", source=source),
+        "gbw_hz": _metric(ac["gbw_hz"], unit="Hz", status="reported", source=source),
         "phase_margin_deg": _metric(
             ac["phase_margin_deg"],
             unit="deg",
             status="reported",
-            source="ac_bode",
+            source=source,
         ),
         "gain_margin_db": _metric(
             ac["gain_margin_db"],
             unit="dB",
             status="reported",
-            source="ac_bode",
+            source=source,
         ),
     }
 
@@ -95,20 +147,23 @@ def build_ac_metric_entries(ac: AcMetrics) -> dict[str, MetricEntry]:
 def merge_ac_comp_entries(
     ac_entries: dict[str, MetricEntry],
     comp: AcCompMetrics,
+    *,
+    engine: str = "python",
 ) -> dict[str, MetricEntry]:
     """Add gain-peaking scalars from ``run_ac_comp.py`` into the AC metrics group."""
+    source = _ac_metric_source(engine)
     merged = dict(ac_entries)
     merged["peak_db"] = _metric(
         comp["peak_db"],
         unit="dB",
         status="reported",
-        source="run_ac_comp.py",
+        source=source,
     )
     merged["peak_freq_hz"] = _metric(
         comp["peak_freq_hz"],
         unit="Hz",
         status="reported",
-        source="run_ac_comp.py",
+        source=source,
     )
     return merged
 
@@ -119,8 +174,8 @@ def build_impedance_entries(cfg: OpampConfig, *, freq_hz: float = 1.0) -> dict[s
     zin = float(np.abs(zin_diff(cfg, f)[0]))
     zout_abs = float(np.abs(zout_model(cfg, f)[0]))
     return {
-        "zin_ohm": _metric(zin, unit="ohm", status="reported", source="impedance_model"),
-        "zout_ohm": _metric(zout_abs, unit="ohm", status="reported", source="impedance_model"),
+        "zin_ohm": _metric(zin, unit="ohm", status="reported", source="python_macromodel"),
+        "zout_ohm": _metric(zout_abs, unit="ohm", status="reported", source="python_macromodel"),
         "rin_ohm": _metric(cfg.rin_ohm, unit="ohm", status="param", source="OpampConfig"),
         "cin_f": _metric(cfg.cin_f, unit="F", status="param", source="OpampConfig"),
         "rout_ohm": _metric(cfg.rout_ohm, unit="ohm", status="param", source="OpampConfig"),
@@ -131,6 +186,7 @@ def build_impedance_entries(cfg: OpampConfig, *, freq_hz: float = 1.0) -> dict[s
 def build_cmrr_psrr_entries(
     cfg: OpampConfig,
     *,
+    engine: str = "python",
     cmrr_result: CmrrSimulationResult | None = None,
     psrr_result: PsrrSimulationResult | None = None,
 ) -> dict[str, MetricEntry]:
@@ -139,12 +195,16 @@ def build_cmrr_psrr_entries(
     acm_dc = float(cmrr_result["acm_db"][0]) if cmrr_result and len(cmrr_result["acm_db"]) else None
     psrr_dc = psrr_result["psrr_dc_db"] if psrr_result else None
 
+    ac_source = _ac_metric_source(engine)
     cmrr_status = "reported" if cmrr_result is not None else "param"
-    cmrr_source = "cmrr_bench" if cmrr_result is not None else "OpampConfig"
+    if cmrr_result is not None:
+        cmrr_source = cmrr_result.get("source", ac_source)
+    else:
+        cmrr_source = "OpampConfig"
     cmrr_value = cmrr_dc if cmrr_result is not None else cfg.cmrr_db
 
     psrr_status = "reported" if psrr_result is not None else "param"
-    psrr_source = "psrr_bench" if psrr_result is not None else "OpampConfig"
+    psrr_source = _psrr_metric_source(engine) if psrr_result is not None else "OpampConfig"
     psrr_value = psrr_dc if psrr_result is not None else cfg.psrr_db
 
     return {
@@ -154,26 +214,15 @@ def build_cmrr_psrr_entries(
             acm_dc,
             unit="dB",
             status="reported" if cmrr_result is not None else "planned",
-            source="run_ac.py",
+            source=ac_source,
         ),
         "psrr_vs_f": _metric(
             psrr_dc,
             unit="dB",
             status="reported" if psrr_result is not None else "planned",
-            source="run_psrr.py",
+            source=_psrr_metric_source(engine) if psrr_result is not None else "run_psrr.py",
         ),
     }
-
-
-def _noise_metric_source(engine: str) -> str:
-    """Return provenance label for simulated noise metrics."""
-    if engine == "python":
-        return "noise_macromodel"
-    if engine == "ngspice":
-        return "ngspice_noise"
-    if engine == "spectre":
-        return "spectre_noise"
-    return "run_noise.py"
 
 
 def build_noise_entries(
@@ -240,26 +289,68 @@ def build_noise_entries(
     return entries
 
 
-def build_tia_metric_entries(metrics: TiaMetrics, *, unit: str = "ohm") -> dict[str, MetricEntry]:
+def _tia_metric_source(engine: str) -> str:
+    """Provenance for TIA AC scalars parsed or simulated per engine."""
+    if engine == "python":
+        return "python_macromodel"
+    if engine == "ngspice":
+        return "ngspice_wrdata"
+    if engine == "spectre":
+        return "spectre_psf"
+    return "python_macromodel"
+
+
+def _gm_metric_source(engine: str) -> str:
+    """Provenance for Gm AC scalars parsed or simulated per engine."""
+    return _tia_metric_source(engine)
+
+
+def build_tia_metric_entries(
+    metrics: TiaMetrics,
+    *,
+    engine: str = "python",
+    unit: str = "ohm",
+) -> dict[str, MetricEntry]:
     """Map TIA AC extraction results to report entries."""
+    source = _tia_metric_source(engine)
     return {
         "zt_dc_ohm": _metric(
             metrics["zt_dc_ohm"],
             unit=unit,
             status="reported",
-            source="tia_ac",
+            source=source,
         ),
         "zt_dc_db": _metric(
             metrics["zt_dc_db"],
             unit="dB",
             status="reported",
-            source="tia_ac",
+            source=source,
         ),
         "bandwidth_hz": _metric(
             metrics["bandwidth_hz"],
             unit="Hz",
             status="reported",
-            source="tia_ac",
+            source=source,
+        ),
+    }
+
+
+def build_gm_metric_entries(
+    metrics: GmMetrics,
+    *,
+    engine: str = "python",
+) -> dict[str, MetricEntry]:
+    """Map Gm AC extraction results to report entries."""
+    source = _gm_metric_source(engine)
+    return {
+        "gm_s": _metric(metrics["gm_s"], unit="S", status="reported", source=source),
+        "rout_ohm": _metric(metrics["rout_ohm"], unit="ohm", status="reported", source=source),
+        "gain_db": _metric(metrics["gain_db"], unit="dB", status="reported", source=source),
+        "bandwidth_hz": _metric(
+            metrics["bandwidth_hz"],
+            unit="Hz",
+            status="reported",
+            source=source,
         ),
     }
 
@@ -267,18 +358,20 @@ def build_tia_metric_entries(metrics: TiaMetrics, *, unit: str = "ohm") -> dict[
 def build_large_signal_entries(
     cfg: OpampConfig,
     *,
+    engine: str = "python",
     thd: ThdMetrics | None = None,
     ideal_flag: bool = False,
     slew_pos_measured: float | None = None,
     slew_neg_measured: float | None = None,
 ) -> dict[str, MetricEntry]:
     """Large-signal parameters; measured by TRAN benches when available."""
+    tran_source = _tran_metric_source(engine)
     if slew_pos_measured is not None and np.isfinite(slew_pos_measured):
         slew_pos = _metric(
             slew_pos_measured,
             unit="V/s",
             status="reported",
-            source="run_slew.py",
+            source=tran_source,
         )
     else:
         slew_pos = _metric(
@@ -292,7 +385,7 @@ def build_large_signal_entries(
             slew_neg_measured,
             unit="V/s",
             status="reported",
-            source="run_slew.py",
+            source=tran_source,
         )
     else:
         slew_neg = _metric(
@@ -321,9 +414,9 @@ def build_large_signal_entries(
     return {
         "slew_pos_vps": slew_pos,
         "slew_neg_vps": slew_neg,
-        "thd_db": _metric(thd_value, unit="dB", status=thd_status, source="run_thd.py"),
-        "hd2_db": _metric(hd2_value, unit="dB", status=thd_status, source="run_thd.py"),
-        "hd3_db": _metric(hd3_value, unit="dB", status=thd_status, source="run_thd.py"),
+        "thd_db": _metric(thd_value, unit="dB", status=thd_status, source=tran_source),
+        "hd2_db": _metric(hd2_value, unit="dB", status=thd_status, source=tran_source),
+        "hd3_db": _metric(hd3_value, unit="dB", status=thd_status, source=tran_source),
     }
 
 
@@ -342,15 +435,21 @@ def build_metrics_report(
     slew_pos_measured: float | None = None,
     slew_neg_measured: float | None = None,
     tia_result: TiaSimulationResult | None = None,
+    gm_result: GmAcSimulationResult | None = None,
 ) -> OpampMetricsReport:
     """Assemble a full metrics report from available simulations and parameters."""
     ac_metrics = ac_result["metrics"] if ac_result else None
     stb_metrics = stb_result["metrics"] if stb_result else ac_metrics
-    ac_entries = build_ac_metric_entries(ac_metrics) if ac_metrics else {}
-    stb_entries = build_ac_metric_entries(stb_metrics) if stb_metrics else {}
+    ac_entries = build_ac_metric_entries(ac_metrics, engine=engine) if ac_metrics else {}
+    stb_entries = build_ac_metric_entries(stb_metrics, engine=engine) if stb_metrics else {}
     tia_entries = (
-        build_tia_metric_entries(tia_result["metrics"], unit="ohm")
+        build_tia_metric_entries(tia_result["metrics"], engine=engine, unit="ohm")
         if tia_result is not None
+        else {}
+    )
+    gm_entries = (
+        build_gm_metric_entries(gm_result["metrics"], engine=engine)
+        if gm_result is not None
         else {}
     )
     return OpampMetricsReport(
@@ -361,6 +460,7 @@ def build_metrics_report(
         impedance=build_impedance_entries(cfg),
         cmrr_psrr=build_cmrr_psrr_entries(
             cfg,
+            engine=engine,
             cmrr_result=cmrr_result,
             psrr_result=psrr_result,
         ),
@@ -372,12 +472,14 @@ def build_metrics_report(
         ),
         large_signal=build_large_signal_entries(
             cfg,
+            engine=engine,
             thd=thd,
             ideal_flag=ideal_flag,
             slew_pos_measured=slew_pos_measured,
             slew_neg_measured=slew_neg_measured,
         ),
         tia=tia_entries,
+        gm=gm_entries,
     )
 
 
@@ -411,4 +513,6 @@ def format_metrics_table(report: OpampMetricsReport) -> str:
     section("Large-signal", report["large_signal"])
     if report.get("tia"):
         section("TIA", report["tia"])
+    if report.get("gm"):
+        section("Gm", report["gm"])
     return "\n".join(lines)

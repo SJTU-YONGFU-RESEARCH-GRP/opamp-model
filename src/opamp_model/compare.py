@@ -10,7 +10,7 @@ from typing import Any, Literal
 import yaml
 
 from opamp_model.io import package_root
-from opamp_model.metrics import OpampMetricsReport
+from opamp_model.metrics import PARITY_SKIP_SOURCES, OpampMetricsReport
 
 DEFAULT_ENGINES = ("python", "ngspice", "spectre")
 METRICS_JSON_NAME = "opamp_metrics.json"
@@ -79,7 +79,44 @@ COMPARE_METRICS: tuple[MetricSpec, ...] = (
         "relative",
         TOLERANCE_MODULE_REL,
     ),
+    MetricSpec(
+        "zt_dc_ohm",
+        "TIA Zt (DC)",
+        "tia",
+        "zt_dc_ohm",
+        "ohm",
+        "relative",
+        TOLERANCE_MODULE_REL,
+    ),
+    MetricSpec(
+        "gm_s",
+        "gm (DC)",
+        "gm",
+        "gm_s",
+        "S",
+        "relative",
+        TOLERANCE_MODULE_REL,
+    ),
+    MetricSpec(
+        "gm_gain_db",
+        "Gm gain (DC)",
+        "gm",
+        "gain_db",
+        "dB",
+        "absolute",
+        None,
+    ),
 )
+
+# Skip peer tolerance when any engine uses a non-SPICE source for these metrics.
+METRIC_SKIP_IF_ANY_SOURCE: dict[str, frozenset[str]] = {
+    "slew_pos_vps": frozenset({"python_macromodel", "tran_scaffold"}),
+    "slew_neg_vps": frozenset({"python_macromodel", "tran_scaffold"}),
+    "psrr_db": frozenset({"python_macromodel", "psrr_macromodel", "hybrid_psrr"}),
+    "integrated_noise_rms_v": frozenset({"python_macromodel", "hybrid_noise_merge"}),
+    "zt_dc_ohm": frozenset({"python_macromodel"}),
+    "gm_s": frozenset({"python_macromodel"}),
+}
 
 GOLDEN_KEY_MAP: dict[str, str] = {
     "a0_db": "a0_db",
@@ -100,6 +137,7 @@ class MetricRow:
     spread: float | None
     spread_display: str
     within_tolerance: bool | None  # None when not checked or insufficient data
+    parity_skipped: bool  # True when all engines share a non-comparable source
 
 
 @dataclass
@@ -113,13 +151,25 @@ class CompareResult:
     failures: list[str]
 
 
-def _metric_value(report: OpampMetricsReport, section: str, field: str) -> float | None:
-    """Extract a finite scalar from a metrics report section."""
+def _metric_entry(
+    report: OpampMetricsReport | None,
+    section: str,
+    field: str,
+) -> dict[str, Any] | None:
+    """Return one metric entry dict from a report section."""
+    if report is None:
+        return None
     block = report.get(section)  # type: ignore[call-overload]
     if not isinstance(block, dict):
         return None
     entry = block.get(field)
-    if not isinstance(entry, dict):
+    return entry if isinstance(entry, dict) else None
+
+
+def _metric_value(report: OpampMetricsReport, section: str, field: str) -> float | None:
+    """Extract a finite scalar from a metrics report section."""
+    entry = _metric_entry(report, section, field)
+    if entry is None:
         return None
     raw = entry.get("value")
     if raw is None:
@@ -227,6 +277,46 @@ def _check_tolerance(spread: float | None, spec: MetricSpec) -> bool | None:
     return spread <= spec.tolerance
 
 
+def _metric_sources(
+    reports: dict[str, OpampMetricsReport],
+    engines: tuple[str, ...],
+    spec: MetricSpec,
+) -> dict[str, str]:
+    """Map engine name to metric ``source`` when a finite value is present."""
+    sources: dict[str, str] = {}
+    for engine in engines:
+        report = reports.get(engine)
+        entry = _metric_entry(report, spec.section, spec.field)
+        if entry is None:
+            continue
+        raw = entry.get("value")
+        if raw is None:
+            continue
+        try:
+            val = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not (val == val):
+            continue
+        source = entry.get("source")
+        if isinstance(source, str) and source:
+            sources[engine] = source
+    return sources
+
+
+def _should_skip_parity(spec: MetricSpec, sources: dict[str, str]) -> bool:
+    """Return True when peer spread should not be pass/fail checked."""
+    if not sources:
+        return True
+    unique = set(sources.values())
+    if len(unique) == 1 and unique.pop() in PARITY_SKIP_SOURCES:
+        return True
+    skip_any = METRIC_SKIP_IF_ANY_SOURCE.get(spec.key)
+    if skip_any is not None and any(src in skip_any for src in sources.values()):
+        return True
+    return False
+
+
 def compare_engines(
     output_root: Path,
     *,
@@ -257,7 +347,9 @@ def compare_engines(
 
         finite = [v for v in engine_values.values() if v is not None]
         spread = compute_spread(finite, kind=spec.spread_kind)
-        within = _check_tolerance(spread, spec)
+        sources = _metric_sources(reports, engines, spec)
+        parity_skipped = _should_skip_parity(spec, sources)
+        within = None if parity_skipped else _check_tolerance(spread, spec)
         if within is False and spec.tolerance is not None:
             limit = (
                 f"{spec.tolerance * 100:.0g}%"
@@ -276,6 +368,7 @@ def compare_engines(
                 spread=spread,
                 spread_display=_format_spread(spread, spec),
                 within_tolerance=within,
+                parity_skipped=parity_skipped,
             )
         )
 
@@ -288,7 +381,9 @@ def compare_engines(
     )
 
 
-def _status_label(within_tolerance: bool | None) -> str:
+def _status_label(within_tolerance: bool | None, *, parity_skipped: bool = False) -> str:
+    if parity_skipped:
+        return "n/a"
     if within_tolerance is None:
         return "—"
     if within_tolerance:
@@ -319,10 +414,17 @@ def format_compare_table(result: CompareResult) -> str:
             cols.append(_format_value(row.golden_value, row.spec))
         cols.append(row.spread_display)
         cols.append(_format_tolerance_limit(row.spec))
-        cols.append(_status_label(row.within_tolerance))
+        cols.append(_status_label(row.within_tolerance, parity_skipped=row.parity_skipped))
         lines.append(pad(cols))
 
     lines.append("")
+    skipped = [row.spec.label for row in result.rows if row.parity_skipped]
+    if skipped:
+        lines.append(
+            "Parity skipped (python-only / hybrid / TRAN scaffold): "
+            + ", ".join(skipped)
+        )
+        lines.append("")
     if result.failures:
         lines.append("Tolerance failures:")
         for msg in result.failures:
@@ -365,11 +467,26 @@ def format_compare_markdown(result: CompareResult) -> str:
             [
                 row.spread_display,
                 _format_tolerance_limit(row.spec),
-                _status_label(row.within_tolerance),
+                _status_label(row.within_tolerance, parity_skipped=row.parity_skipped),
             ]
         )
         lines.append("| " + " | ".join(cols) + " |")
 
+    skipped = [row.spec.label for row in result.rows if row.parity_skipped]
+    if skipped:
+        lines.extend(
+            [
+                "",
+                "## Parity skipped",
+                "",
+                "Peer tolerance is not applied when all engines share a "
+                "python-only / hybrid / TRAN-scaffold source, or when a metric "
+                "is known to use Python substitution on some engines:",
+                "",
+            ]
+        )
+        for label in skipped:
+            lines.append(f"- {label}")
     lines.extend(["", "## Tolerance limits", ""])
     for spec in COMPARE_METRICS:
         limit = _format_tolerance_limit(spec)

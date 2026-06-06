@@ -668,6 +668,8 @@ def preserve_metrics_sections(
         )
     if not merged.get("tia") and previous.get("tia"):
         merged["tia"] = previous["tia"]
+    if not merged.get("gm") and previous.get("gm"):
+        merged["gm"] = previous["gm"]
     return OpampMetricsReport(**merged)
 
 
@@ -694,6 +696,7 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         return None
 
     engine_label = resolve_engine_label(engine)
+    scaffold = _tran_scaffold_note(engine)
     lines = [
         f"# opamp-model — {engine_label}",
         "",
@@ -701,9 +704,16 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
         f"- **Generated:** {_utc_timestamp()}",
         f"- **Output directory:** `{output_dir.name}/`",
         "",
+    ]
+    if scaffold:
+        lines.append(scaffold.rstrip())
+        lines.append("")
+    lines.extend(
+        [
         "## Bench reports",
         "",
-    ]
+        ]
+    )
     if ac_report.is_file():
         lines.append("- [AC open-loop](AC_REPORT.md)")
     if ac_comp_report.is_file():

@@ -107,6 +107,24 @@ def gm_frequency_grid(
     return log_frequency_sweep(cfg.f_start_hz, cfg.f_stop_hz, cfg.points_per_decade)
 
 
+def bode_to_gm_result(
+    gm_cfg: GmConfig,
+    frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+    phase_deg: NDArray[np.float64],
+) -> GmAcSimulationResult:
+    """Build a Gm AC result from loaded-transfer AC columns (Vdiff AC = 1 V)."""
+    gm_s = gm_vs_frequency(gm_cfg, frequency_hz)
+    metrics = extract_gm_metrics(gm_cfg, frequency_hz, gain_db)
+    return GmAcSimulationResult(
+        frequency_hz=frequency_hz.astype(np.float64),
+        gain_db=gain_db.astype(np.float64),
+        phase_deg=phase_deg.astype(np.float64),
+        gm_s=gm_s,
+        metrics=metrics,
+    )
+
+
 def simulate_gm_ac(
     gm_cfg: GmConfig,
     noise: OpampNoiseConfig | None = None,
@@ -234,18 +252,21 @@ def plot_gm_vs_f(
 def write_gm_ac_report(
     output_dir: Path,
     *,
+    engine: str = "python",
     gm_cfg: GmConfig,
     result: GmAcSimulationResult,
     bode_svg: Path,
     gm_svg: Path,
 ) -> Path:
     """Write ``GM_AC_REPORT.md`` with figures and scalar metrics."""
+    from opamp_model.cli_helpers import resolve_engine_label
+
     path = output_dir / "GM_AC_REPORT.md"
     metrics = result["metrics"]
     lines = [
         "# Gm AC bench",
         "",
-        "- **Engine:** Python behavioral model (`python`)",
+        f"- **Engine:** {resolve_engine_label(engine)} (`{engine}`)",
         "",
         "## Macromodel",
         "",

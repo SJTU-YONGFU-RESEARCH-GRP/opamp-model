@@ -28,6 +28,7 @@ class CmrrSimulationResult(TypedDict):
     acm_db: NDArray[np.float64]
     cmrr_db: NDArray[np.float64]
     cmrr_dc_db: float
+    source: str
 
 
 class PsrrSimulationResult(TypedDict):
@@ -81,6 +82,7 @@ def simulate_cmrr(cfg: OpampConfig) -> CmrrSimulationResult:
         acm_db=acm_db,
         cmrr_db=cmrr_db,
         cmrr_dc_db=float(cmrr_db[0]),
+        source="macromodel",
     )
 
 

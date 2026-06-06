@@ -1,0 +1,29 @@
+* Gm / OTA loaded AC — ngspice VCCS + Rout||Cout shunt.
+*
+* Loaded transfer Vout/Vdiff with Vdiff AC = 1 V (gain in dB = 20*log10|Vout|).
+
+.param gm_s=1m
+.param rout_ohm=1Meg
+.param cout_f=500f
+.param f_start=1
+.param f_stop=100Meg
+.param dec=10
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+
+VIN inp 0 DC 0 AC 1
+VINN inn 0 DC 0 AC 0
+
+G1 iout 0 inp inn {gm_s}
+ROUT iout 0 {rout_ohm}
+COUT iout 0 {cout_f}
+
+.ac dec {dec} {f_start} {f_stop}
+.control
+run
+set wr_singlescale
+wrdata gm_ac_bode.raw frequency vdb(iout) vp(iout)
+.endc
+
+.end

@@ -20,7 +20,11 @@ from opamp_model.io import package_root, write_bode_csv, write_cmrr_csv
 from opamp_model.impedance import plot_impedance
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
 from opamp_model.model import simulate_ac
-from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_ac_ngspice
+from opamp_model.ngspice_engine import (
+    NgspiceNotFoundError,
+    simulate_ac_ngspice,
+    try_cmrr_from_ngspice,
+)
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
@@ -28,7 +32,12 @@ from opamp_model.report import (
     write_engine_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_ac_spectre
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_ac_spectre,
+    try_cmrr_from_spectre,
+)
 
 
 def main() -> None:
@@ -81,11 +90,19 @@ def main() -> None:
     )
     impedance_svg = out_dir / "impedance.svg"
     plot_impedance(cfg, impedance_svg, title="Input / output impedance")
-    cmrr_result = cmrr_from_open_loop(
-        result["frequency_hz"],
-        result["gain_db"],
-        cmrr_linear=cfg.cmrr_linear,
-    )
+    cmrr_result = None
+    if args.simulator == "ngspice":
+        cmrr_result = try_cmrr_from_ngspice(cfg, out_dir, result)
+    elif args.simulator == "spectre":
+        cmrr_result = try_cmrr_from_spectre(cfg, out_dir, result)
+    if cmrr_result is None:
+        cm_source = "macromodel" if args.simulator == "python" else "hybrid_cmrr"
+        cmrr_result = cmrr_from_open_loop(
+            result["frequency_hz"],
+            result["gain_db"],
+            cmrr_linear=cfg.cmrr_linear,
+            source=cm_source,
+        )
     cmrr_csv = out_dir / "cmrr.csv"
     write_cmrr_csv(
         cmrr_csv,

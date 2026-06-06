@@ -1,0 +1,45 @@
+* Common-mode AC Bode — ngspice macromodel (ACM path).
+*
+* Stimulus: inp tied to inn; both carry common-mode AC (differential AC = 0).
+* Target: ACM(s) = Aol(s) / CMRR_LINEAR with same fp2/fz shaping as diff path.
+*
+*   ACM_gain = A0_LINEAR / CMRR_LINEAR
+*   H(s) = ACM_gain / (1 + s/wp) / (1 + s/wp2) * (1 + s/wz)
+
+.param a0_db=80
+.param gbw_hz=10Meg
+.param fp2_hz=0
+.param fz_hz=0
+.param cmrr_db=90
+.param rin_ohm=1e12
+.param rout_ohm=100
+.param a0_linear=PLACEHOLDER_A0
+.param cmrr_linear=PLACEHOLDER_CMRR
+.param acm_gain=PLACEHOLDER_ACM
+.param wp_rad_s=PLACEHOLDER_WP
+.param rlp_ohm=PLACEHOLDER_RLP
+.param clp_f=PLACEHOLDER_CLP
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+VCM inn 0 DC 0.9 AC 1
+Elink inp inn inn 0 1
+Rinn inn 0 {rin_ohm}
+Rinp inp 0 {rin_ohm}
+
+Eaux n1 0 inp 0 {acm_gain}
+Rlp n1 n2 {rlp_ohm}
+Clp n2 0 {clp_f}
+PLACEHOLDER_FP2_BLOCK
+PLACEHOLDER_FZ_BLOCK
+Eout out 0 PLACEHOLDER_OUT_NODE 0 1
+ROUT out 0 {rout_ohm}
+
+.ac dec 10 1 100Meg
+.control
+run
+set wr_singlescale
+wrdata ac_cm.raw frequency vdb(out) vp(out)
+.endc
+
+.end

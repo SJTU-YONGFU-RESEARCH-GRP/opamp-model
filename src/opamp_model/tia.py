@@ -108,6 +108,25 @@ def extract_tia_metrics(
     )
 
 
+def bode_to_tia_result(
+    frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+    phase_deg: NDArray[np.float64],
+) -> TiaSimulationResult:
+    """Build a TIA result from AC columns (Iin AC = 1 A → |Vout| in Ω)."""
+    zt_db = gain_db.astype(np.float64)
+    zt_ohm = (10.0 ** (zt_db / 20.0)).astype(np.float64)
+    zt_phase_deg = phase_deg.astype(np.float64)
+    metrics = extract_tia_metrics(frequency_hz, zt_db)
+    return TiaSimulationResult(
+        frequency_hz=frequency_hz.astype(np.float64),
+        zt_ohm=zt_ohm,
+        zt_db=zt_db,
+        zt_phase_deg=zt_phase_deg,
+        metrics=metrics,
+    )
+
+
 def simulate_tia_ac(
     opamp: OpampConfig,
     tia: TiaConfig,

@@ -59,6 +59,7 @@ def test_cmrr_from_open_loop_bundle() -> None:
         cmrr_linear=cfg.cmrr_linear,
     )
     assert bundle["cmrr_dc_db"] == pytest.approx(cfg.cmrr_db, abs=0.01)
+    assert bundle["source"] == "hybrid_cmrr"
     assert len(bundle["acm_db"]) == len(ac["frequency_hz"])
 
 

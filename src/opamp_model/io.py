@@ -102,6 +102,24 @@ def read_ngspice_noise_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
     }
 
 
+def read_ngspice_psrr_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
+    """Read ngspice ``wrdata`` from PSRR AC analysis (frequency, ``vm(out)``).
+
+    With unit AC on VDD and quiet differential inputs, ``vm(out)`` is ``|H_ps|``.
+    """
+    table = np.loadtxt(path)
+    if table.ndim == 1:
+        table = table.reshape(1, -1)
+    if table.shape[1] < 2:
+        msg = f"Expected >= 2 columns in PSRR wrdata, got {table.shape[1]}."
+        raise ValueError(msg)
+    magnitude = table[:, -1].astype(np.float64)
+    return {
+        "frequency_hz": table[:, 0].astype(np.float64),
+        "magnitude": magnitude,
+    }
+
+
 def read_ngspice_ac_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
     """Read ngspice ``wrdata`` from AC analysis (frequency, vdb, vp columns).
 

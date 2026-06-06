@@ -4,9 +4,9 @@ Self-contained bench definitions for **opamp-model**. Metric names and default s
 
 ## Multi-engine rule
 
-Each engine (**python**, **ngspice**, **spectre**) must run its **own** implementation of the macromodel in [MODEL.md](MODEL.md). No engine is “golden”; reported metrics must come from that engine’s simulation and extractor. `compare_engines.py` (planned) will report cross-engine spread and optional comparison to `golden_metrics.yaml` (transistor-level reference only).
+Each engine (**python**, **ngspice**, **spectre**) must run its **own** implementation of the macromodel in [MODEL.md](MODEL.md). No engine is “golden”; reported metrics must come from that engine’s simulation and extractor. `compare_engines.py` reports cross-engine spread (with parity **n/a** for python-only / hybrid / TRAN-scaffold sources) and optional comparison to `golden_metrics.yaml` (transistor-level reference only).
 
-Until Spectre PSF and full ngspice noise parsers land, some benches document **scaffolding** behavior in the engine matrix below.
+Some benches still use Python substitution or hybrid post-processing; see the engine matrix and metric ``source`` tags in ``opamp_metrics.json``.
 
 ## Default frequency sweep (AC / STB / noise / PSRR)
 
@@ -25,12 +25,14 @@ Spectre netlists receive ``f_start``, ``f_stop``, ``dec`` from ``OpampConfig`` a
 
 | Bench | Script | python | ngspice | spectre |
 | --- | --- | --- | --- | --- |
-| AC open-loop | `run_ac.py` | Full | ``ac_open_loop.cir`` + ``wrdata`` | Netlist + Python Bode (PSF TBD) |
-| STB loop gain | `run_stb.py` | Full | AC netlist + ``loop_beta`` in Python | Netlist + Python Bode (PSF TBD) |
-| Noise | `run_noise.py` | Full | ``noise_open_loop.cir`` + parser | ``noise_open_loop.scs`` + PSF parser |
+| AC open-loop | `run_ac.py` | Full | ``ac_open_loop.cir`` + ``wrdata`` | PSF Bode via ``spectre_psf.py`` |
+| STB loop gain | `run_stb.py` | Full | AC netlist + ``loop_beta`` in Python | PSF Bode + ``loop_beta`` in Python |
+| Noise | `run_noise.py` | Full | Hybrid AC × config | Hybrid PSF AC × config |
 | PSRR | `run_psrr.py` | Full | Python macromodel | Python macromodel |
-| Slew rate | `run_slew.py` | Full | — | — |
-| THD | `run_thd.py` | Full | — | — |
+| Slew rate | `run_slew.py` | Full | Batch: — (manual TRAN stub) | Batch: — (manual TRAN stub) |
+| THD | `run_thd.py` | Full | Batch: — (manual TRAN stub) | Batch: — (manual TRAN stub) |
+| TIA AC | `run_tia_ac.py` | Full | Python macromodel | Python macromodel |
+| Gm AC | `run_gm_ac.py` | Full | Python macromodel | Python macromodel |
 
 Batch runner ``scripts/run_all_simulations.sh`` invokes AC/STB/noise/PSRR for all three engines (when binaries exist) and slew/THD for **python** only.
 
@@ -120,21 +122,27 @@ Disabled when ``--ideal`` or ``nl_a2`` / ``nl_a3`` are zero.
 
 **Engine:** Python only.
 
-### TIA (`run_tia_*.py`) — planned
+### TIA (`run_tia_ac.py`)
 
 | Output | Definition | Unit |
 | --- | --- | --- |
-| `Zt` | Transimpedance Vout/Iin (or Vout/Vin for voltage TIA) | Ω or V/V |
+| `Zt` | Closed-loop transimpedance Vout/Iin (or Vout/Vin for voltage TIA) | Ω or V/V |
 | Bandwidth | −3 dB frequency of `Zt` | Hz |
-| Noise | Input-referred current or voltage noise | A/√Hz or V/√Hz |
 
-### Gm (`run_gm_*.py`) — planned
+**Engine:** Python macromodel on all engines (ngspice/Spectre stubs optional).
+
+**Artifacts:** ``tia_zt.csv``, ``tia_zt.svg``, ``TIA_REPORT.md``.
+
+### Gm (`run_gm_ac.py`)
 
 | Output | Definition | Unit |
 | --- | --- | --- |
-| `gm` | Transconductance | S |
-| Rout | Output resistance | Ω |
-| Noise | Input-referred voltage noise | V/√Hz |
+| `gm` | Transconductance vs frequency | S |
+| Rout | Output resistance (param) | Ω |
+
+**Engine:** Python macromodel on all engines.
+
+**Artifacts:** ``gm_ac_bode.csv``, ``gm_ac_bode.svg``, ``gm_vs_f.svg``, ``GM_AC_REPORT.md``.
 
 ### AC compensation / gain peaking (`run_ac_comp.py`)
 

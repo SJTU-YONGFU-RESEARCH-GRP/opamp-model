@@ -1,0 +1,28 @@
+// Gm / OTA loaded AC testbench (Cadence Spectre + configurable_gm.va).
+//
+// Run via:
+//   python scripts/run_gm_ac.py --simulator spectre --output-dir outputs/spectre
+
+simulator lang=spectre
+
+ahdl_include "./veriloga/configurable_gm.va"
+
+parameters gm_s=1m
+parameters rout_ohm=1Meg
+parameters cout_f=500f
+parameters f_start=1
+parameters f_stop=100Meg
+parameters dec=10
+
+VDD (vdd 0) vsource dc=1.8
+VSS (vss 0) vsource dc=0.0
+
+VIN (inp 0) vsource dc=0 type=sine ampl=0 freq=0 \
+    acmag=1 acphase=0
+VINN (inn 0) vsource dc=0 type=dc
+
+XGM (inp inn iout vdd vss) configurable_gm \
+    GM_S=gm_s ROUT_OHM=rout_ohm COUT_F=cout_f
+
+save iout
+ac ac start=f_start stop=f_stop dec=dec annotate=status

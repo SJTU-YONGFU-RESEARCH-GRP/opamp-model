@@ -1,6 +1,8 @@
 // Configurable voltage op-amp — dominant-pole differential macromodel.
 //
-// Open-loop: H(s) = A0 / (1 + s/wp),  wp = 2*pi*GBW_HZ/A0_LINEAR
+// Open-loop: H(s) = A0 / (1 + s/wp) / (1 + s/wp2) * (1 + s/wz)
+//   wp = 2*pi*GBW_HZ/A0_LINEAR;  wp2 = 2*pi*FP2_HZ;  wz = 2*pi*FZ_HZ
+// When FP2_HZ=0 and FZ_HZ=0, only the dominant pole is applied.
 // CMRR: ACM(s) = Aol(s) / CMRR_LINEAR  (common-mode path)
 // PSRR: H_ps(s) = (1/PSRR_LINEAR) / (1 + s/wp_psrr)  (VDD feedthrough)
 // Noise: white_noise + flicker_noise on inp-inn (paper Fig. 2 pattern)
@@ -13,7 +15,7 @@
 `include "constants.vams"
 `include "disciplines.vams"
 
-(* instance_parameter_list = {A0_DB, GBW_HZ, CMRR_DB, PSRR_DB, PSRR_POLE_HZ,
+(* instance_parameter_list = {A0_DB, GBW_HZ, FP2_HZ, FZ_HZ, CMRR_DB, PSRR_DB, PSRR_POLE_HZ,
     RIN_OHM, CIN_F, ROUT_OHM, COUT_F, EN_WHITE_V_PER_SQRT_HZ,
     EN_FLICKER_1HZ_V_PER_SQRT_HZ, EN_FLICKER_EF, KF, AF, BIAS_CURRENT_A,
     ENABLE_NOISE} *)
@@ -47,13 +49,21 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     real cmrr_linear;
     real psrr_linear;
     real wp;
+    real wp2;
+    real wz;
     real wp_psrr;
     real rn_noise;
     real pn_flicker;
     real ir_bias;
+    real v_diff;
+    real v_cm;
     // Spectre laplace_nd requires array variables (not inline parameter expressions).
     real numer[0:1];
     real denom[0:1];
+    real fp2_numer[0:1];
+    real fp2_denom[0:1];
+    real fz_numer[0:1];
+    real fz_denom[0:1];
     real cm_numer[0:1];
     real cm_denom[0:1];
     real ps_numer[0:1];
@@ -89,11 +99,45 @@ module configurable_opamp(inp, inn, out, vdd, vss);
         ps_denom[0] = wp_psrr;
         ps_denom[1] = 1.0;
 
+        // Differential open-loop path with optional second pole and zero.
+        // Spectre rejects laplace_nd inside constant-condition branches; always
+        // evaluate both stages and use wp2/wz -> 1e30 when FP2_HZ/FZ_HZ = 0.
+        v_diff = laplace_nd(V(inp) - V(inn), numer, denom);
+        if (FP2_HZ > 0.0)
+            wp2 = 2.0 * `M_PI * FP2_HZ;
+        else
+            wp2 = 1.0e30;
+        fp2_numer[0] = wp2;
+        fp2_numer[1] = 0.0;
+        fp2_denom[0] = wp2;
+        fp2_denom[1] = 1.0;
+        v_diff = laplace_nd(v_diff, fp2_numer, fp2_denom);
+        if (FZ_HZ > 0.0)
+            wz = 2.0 * `M_PI * FZ_HZ;
+        else
+            wz = 1.0e30;
+        fz_numer[0] = wz;
+        fz_numer[1] = 1.0;
+        fz_denom[0] = wz;
+        fz_denom[1] = 0.0;
+        v_diff = laplace_nd(v_diff, fz_numer, fz_denom);
+
+        // Common-mode path: ACM(s) = Aol(s) / CMRR_LINEAR (same fp2/fz shaping).
+        v_cm = laplace_nd(0.5 * (V(inp) + V(inn)), cm_numer, cm_denom);
+        fp2_numer[0] = wp2;
+        fp2_numer[1] = 0.0;
+        fp2_denom[0] = wp2;
+        fp2_denom[1] = 1.0;
+        v_cm = laplace_nd(v_cm, fp2_numer, fp2_denom);
+        fz_numer[0] = wz;
+        fz_numer[1] = 1.0;
+        fz_denom[0] = wz;
+        fz_denom[1] = 0.0;
+        v_cm = laplace_nd(v_cm, fz_numer, fz_denom);
+
         // Pass branch potentials directly into laplace_nd; assigning to reals
         // first strips Spectre AC small-signal and yields zero gain in PSF.
-        V(out) <+ laplace_nd(V(inp) - V(inn), numer, denom)
-               + laplace_nd(0.5 * (V(inp) + V(inn)), cm_numer, cm_denom)
-               + laplace_nd(V(vdd), ps_numer, ps_denom);
+        V(out) <+ v_diff + v_cm + laplace_nd(V(vdd), ps_numer, ps_denom);
 
         // High-Z differential input conductance (optional loading).
         if (RIN_OHM > 0.0)
