@@ -106,8 +106,8 @@ def test_veriloga_laplace_uses_array_variables_for_cm_ps() -> None:
     assert "real numer[0:1]" in va
     assert "real cm_numer[0:1]" in va
     assert "real ps_numer[0:1]" in va
-    assert "laplace_nd(vd, numer, denom)" in va
-    assert "laplace_nd(vcm, cm_numer, cm_denom)" in va
+    assert "laplace_nd(V(inp) - V(inn), numer, denom)" in va
+    assert "laplace_nd(0.5 * (V(inp) + V(inn)), cm_numer, cm_denom)" in va
     assert "laplace_nd(V(vdd), ps_numer, ps_denom)" in va
     assert "cm_numer[0] = numer[0] / cmrr_linear" in va
     assert "ps_numer[0] = (1.0 / psrr_linear) * wp_psrr" in va
@@ -115,9 +115,9 @@ def test_veriloga_laplace_uses_array_variables_for_cm_ps() -> None:
 
 
 def test_veriloga_common_mode_voltage_definition() -> None:
-    """Common-mode stimulus is half-sum of input pins."""
+    """Common-mode stimulus is half-sum of input pins in the CM laplace path."""
     va = _va_path().read_text(encoding="utf-8")
-    assert "vcm = 0.5 * (V(inp) + V(inn))" in va
+    assert "0.5 * (V(inp) + V(inn))" in va
 
 
 def test_psrr_netlist_wires_cm_ps_parameters() -> None:
@@ -126,7 +126,7 @@ def test_psrr_netlist_wires_cm_ps_parameters() -> None:
     assert "CMRR_DB=cmrr_db" in text
     assert "PSRR_DB=psrr_db" in text
     assert "PSRR_POLE_HZ=psrr_pole_hz" in text
-    assert "acmag=1" in text
+    assert "mag=1" in text
 
 
 def test_spectre_compiles_ac_open_loop_with_cm_ps() -> None:

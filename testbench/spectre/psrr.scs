@@ -22,7 +22,7 @@ parameters f_stop=100Meg
 parameters dec=10
 
 VDD (vdd 0) vsource dc=1.8 type=sine ampl=0 freq=0 \
-    acmag=1 acphase=0
+    mag=1 phase=0
 VSS (vss 0) vsource dc=0.0
 VINP (inp 0) vsource dc=0.9 type=dc
 VINN (inn 0) vsource dc=0.9 type=dc
@@ -31,6 +31,9 @@ XOP (inp inn out vdd vss) configurable_opamp \
     A0_DB=a0_db GBW_HZ=gbw_hz CMRR_DB=cmrr_db PSRR_DB=psrr_db \
     PSRR_POLE_HZ=psrr_pole_hz RIN_OHM=rin_ohm CIN_F=cin_f \
     ROUT_OHM=rout_ohm COUT_F=cout_f
+
+ROUT (out 0) resistor r=rout_ohm
+COUT (out 0) capacitor c=cout_f
 
 save out vdd
 ac ac start=f_start stop=f_stop dec=dec annotate=status

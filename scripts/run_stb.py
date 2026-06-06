@@ -28,7 +28,7 @@ from opamp_model.report import (
 from opamp_model.model import AcSimulationResult, simulate_stb
 from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_ac_ngspice
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreNotFoundError, simulate_ac_spectre
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_ac_spectre
 
 
 def _scale_loop_gain(result: AcSimulationResult, loop_beta: float) -> AcSimulationResult:
@@ -74,7 +74,7 @@ def main() -> None:
             result = _scale_loop_gain(simulate_ac_spectre(cfg, out_dir, noise), cfg.loop_beta)
         else:
             raise ValueError(f"Unknown simulator: {args.simulator}")
-    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc

@@ -37,7 +37,7 @@ TRAN stubs and Python macromodel curves until full SPICE TRAN netlists exist.
 
 Options:
   --output-root DIR   Base output directory (default: ${ROOT_DIR}/outputs).
-  --skip-missing      Skip ngspice/spectre when binaries are absent.
+  --skip-missing      Skip ngspice/spectre when binaries or Spectre license are absent.
   --ideal             Pass --ideal to each bench script.
   -h, --help          Show this message.
 EOF
@@ -70,17 +70,31 @@ run_bench() {
                 echo "Skipping ngspice (${script}) — not on PATH."
                 return 0
             fi
-            if [[ "${engine}" == "spectre" ]] && ! command -v spectre >/dev/null 2>&1; then
-                echo "Skipping spectre (${script}) — not on PATH."
-                return 0
+            if [[ "${engine}" == "spectre" ]]; then
+                if ! command -v spectre >/dev/null 2>&1 \
+                    && [[ ! -x /eda/cadence/SPECTRE241/tools/bin/spectre ]] \
+                    && [[ ! -x /eda/cadence/SPECTRE231/tools/bin/spectre ]]; then
+                    echo "Skipping spectre (${script}) — not on PATH."
+                    return 0
+                fi
+                if ! "${PYTHON}" -c "from opamp_model.spectre_engine import spectre_is_runnable; raise SystemExit(0 if spectre_is_runnable() else 1)"; then
+                    echo "Skipping spectre (${script}) — license not configured."
+                    return 0
+                fi
             fi
         fi
     fi
     echo "=== ${engine}: ${script} ==="
-    "${PYTHON}" "${ROOT_DIR}/scripts/${script}" \
+    if ! "${PYTHON}" "${ROOT_DIR}/scripts/${script}" \
         --simulator "${engine}" \
         --output-dir "${out}" \
-        "${EXTRA_ARGS[@]}"
+        "${EXTRA_ARGS[@]}"; then
+        if [[ "${engine}" == "python" ]]; then
+            return 1
+        fi
+        echo "WARNING: ${engine}: ${script} failed; continuing batch."
+        return 0
+    fi
 }
 
 write_report() {
@@ -114,3 +128,4 @@ fi
 
 echo "Batch complete under ${OUTPUT_ROOT}/"
 echo "Open outputs/<engine>/REPORT.md for figures and bench report links."
+echo "Open ${OUTPUT_ROOT}/COMPARE_REPORT.md for cross-engine spread (2% module tolerance)."

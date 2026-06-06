@@ -30,7 +30,7 @@ class OpampConfig:
 
     a0_db: float = 80.0
     gbw_hz: float = 10.0e6
-    fp2_hz: float = 200.0e6
+    fp2_hz: float = 0.0
     fz_hz: float = 0.0
     cmrr_db: float = 90.0
     psrr_db: float = 80.0

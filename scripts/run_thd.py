@@ -25,7 +25,7 @@ from opamp_model.report import (
 )
 from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreNotFoundError, run_spectre_tran_stub
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, run_spectre_tran_stub
 from opamp_model.tran import (
     compute_thd,
     is_thd_ideal,
@@ -93,7 +93,7 @@ def main() -> None:
                 template_name="thd_stub.scs",
                 log_name="spectre_thd_stub.log",
             )
-    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc

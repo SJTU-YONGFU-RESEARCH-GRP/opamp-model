@@ -4,11 +4,15 @@
 // CMRR: ACM(s) = Aol(s) / CMRR_LINEAR  (common-mode path)
 // PSRR: H_ps(s) = (1/PSRR_LINEAR) / (1 + s/wp_psrr)  (VDD feedthrough)
 // Noise: white_noise + flicker_noise on inp-inn (paper Fig. 2 pattern)
+//
+// Spectre notes:
+// - laplace_nd coeffs must be refreshed each analog evaluation (not only initial_step).
+// - Pass V(inp)-V(inn) directly into laplace_nd (not via intermediate reals).
+// - Model Rout||Cout with external netlist passives; internal I(out) shunts break AC.
 
 `include "constants.vams"
 `include "disciplines.vams"
 
-(* compact_module *)
 (* instance_parameter_list = {A0_DB, GBW_HZ, CMRR_DB, PSRR_DB, PSRR_POLE_HZ,
     RIN_OHM, CIN_F, ROUT_OHM, COUT_F, EN_WHITE_V_PER_SQRT_HZ,
     EN_FLICKER_1HZ_V_PER_SQRT_HZ, EN_FLICKER_EF, KF, AF, BIAS_CURRENT_A,
@@ -44,8 +48,6 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     real psrr_linear;
     real wp;
     real wp_psrr;
-    real vd;
-    real vcm;
     real rn_noise;
     real pn_flicker;
     real ir_bias;
@@ -58,41 +60,39 @@ module configurable_opamp(inp, inn, out, vdd, vss);
     real ps_denom[0:1];
 
     analog begin
-        @(initial_step) begin
-            a0_linear = pow(10.0, A0_DB / 20.0);
-            if (a0_linear < 1.0)
-                a0_linear = 1.0;
-            cmrr_linear = pow(10.0, CMRR_DB / 20.0);
-            if (cmrr_linear < 1.0)
-                cmrr_linear = 1.0;
-            psrr_linear = pow(10.0, PSRR_DB / 20.0);
-            if (psrr_linear < 1.0)
-                psrr_linear = 1.0;
-            wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
-            wp_psrr = 2.0 * `M_PI * PSRR_POLE_HZ;
-            if (wp_psrr < 1.0e-30)
-                wp_psrr = 1.0e-30;
-            // H(s) = (a0*wp) / (s + wp)  <=>  numer {a0*wp, 0}, denom {wp, 1}
-            numer[0] = a0_linear * wp;
-            numer[1] = 0.0;
-            denom[0] = wp;
-            denom[1] = 1.0;
-            // ACM(s) = Aol(s) / CMRR_LINEAR
-            cm_numer[0] = numer[0] / cmrr_linear;
-            cm_numer[1] = 0.0;
-            cm_denom[0] = wp;
-            cm_denom[1] = 1.0;
-            // H_ps(s) = (1/psrr_linear) / (1 + s/wp_psrr)
-            ps_numer[0] = (1.0 / psrr_linear) * wp_psrr;
-            ps_numer[1] = 0.0;
-            ps_denom[0] = wp_psrr;
-            ps_denom[1] = 1.0;
-        end
+        a0_linear = pow(10.0, A0_DB / 20.0);
+        if (a0_linear < 1.0)
+            a0_linear = 1.0;
+        cmrr_linear = pow(10.0, CMRR_DB / 20.0);
+        if (cmrr_linear < 1.0)
+            cmrr_linear = 1.0;
+        psrr_linear = pow(10.0, PSRR_DB / 20.0);
+        if (psrr_linear < 1.0)
+            psrr_linear = 1.0;
+        wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
+        wp_psrr = 2.0 * `M_PI * PSRR_POLE_HZ;
+        if (wp_psrr < 1.0e-30)
+            wp_psrr = 1.0e-30;
+        // H(s) = (a0*wp) / (s + wp)  <=>  numer {a0*wp, 0}, denom {wp, 1}
+        numer[0] = a0_linear * wp;
+        numer[1] = 0.0;
+        denom[0] = wp;
+        denom[1] = 1.0;
+        // ACM(s) = Aol(s) / CMRR_LINEAR
+        cm_numer[0] = numer[0] / cmrr_linear;
+        cm_numer[1] = 0.0;
+        cm_denom[0] = wp;
+        cm_denom[1] = 1.0;
+        // H_ps(s) = (1/psrr_linear) / (1 + s/wp_psrr)
+        ps_numer[0] = (1.0 / psrr_linear) * wp_psrr;
+        ps_numer[1] = 0.0;
+        ps_denom[0] = wp_psrr;
+        ps_denom[1] = 1.0;
 
-        vd = V(inp) - V(inn);
-        vcm = 0.5 * (V(inp) + V(inn));
-        V(out) <+ laplace_nd(vd, numer, denom)
-               + laplace_nd(vcm, cm_numer, cm_denom)
+        // Pass branch potentials directly into laplace_nd; assigning to reals
+        // first strips Spectre AC small-signal and yields zero gain in PSF.
+        V(out) <+ laplace_nd(V(inp) - V(inn), numer, denom)
+               + laplace_nd(0.5 * (V(inp) + V(inn)), cm_numer, cm_denom)
                + laplace_nd(V(vdd), ps_numer, ps_denom);
 
         // High-Z differential input conductance (optional loading).
@@ -101,11 +101,8 @@ module configurable_opamp(inp, inn, out, vdd, vss);
         if (CIN_F > 0.0)
             I(inp, inn) <+ CIN_F * ddt(V(inp, inn));
 
-        // Output shunt (Rout || Cout).
-        if (ROUT_OHM > 0.0)
-            I(out) <+ V(out) / ROUT_OHM;
-        if (COUT_F > 0.0)
-            I(out) <+ COUT_F * ddt(V(out));
+        // Output shunt (Rout || Cout) — modeled externally in Spectre/SPICE netlists;
+        // an internal I(out) shunt here breaks Spectre AC with laplace_nd.
 
         // Input-referred noise (Coram-corrected flicker + thermal, paper Fig. 2).
         if (ENABLE_NOISE != 0.0) begin

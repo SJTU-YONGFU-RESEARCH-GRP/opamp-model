@@ -184,14 +184,14 @@ Shared CLI flags: `--simulator {python,ngspice,spectre}`, `--output-dir`, `--ide
 
 ### Compare engines
 
-After running benches for each engine, check peer spread against [docs/MODEL.md](docs/MODEL.md) limits (A0 0.1 dB, GBW 5%, phase margin 2°, integrated noise RMS 5%):
+After running benches for each engine, check peer spread against compare limits (A0 0.1 dB, GBW 2%, phase margin 2°, integrated noise RMS 2%, slew 2%):
 
 ```bash
 ./scripts/run_all_simulations.sh --skip-missing
 python scripts/compare_engines.py --output-root outputs
 ```
 
-Optional reference column from `docs/golden_metrics.yaml` (not used for pass/fail). Exit code is non-zero when spread exceeds tolerance.
+Optional reference column from `docs/golden_metrics.yaml` (not used for pass/fail). Writes `outputs/COMPARE_REPORT.md` with spread, limit, and status columns. Exit code is non-zero when spread exceeds tolerance.
 
 ## Metrics and outputs
 

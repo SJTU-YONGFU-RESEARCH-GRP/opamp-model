@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from opamp_model.cli_helpers import resolve_engine_label
+from opamp_model.compare import TOLERANCE_MODULE_REL
 from opamp_model.config import OpampConfig, OpampNoiseConfig, TiaConfig
 from opamp_model.metrics import MetricEntry, OpampMetricsReport, format_metrics_table
 from opamp_model.noise_analysis import NoiseBreakdown
@@ -740,6 +741,18 @@ def write_engine_report(output_dir: Path, *, engine: str) -> Path | None:
             lines.append(_figure_block(name, caption))
 
     metrics_path = output_dir / "opamp_metrics.json"
+    compare_report = output_dir.parent / "COMPARE_REPORT.md"
+    if compare_report.is_file():
+        lines.extend(
+            [
+                "## Cross-engine comparison",
+                "",
+                "Peer spread across simulation modules is summarized in "
+                "[COMPARE_REPORT.md](../COMPARE_REPORT.md) "
+                f"(default **{TOLERANCE_MODULE_REL * 100:.0g}%** relative tolerance between modules where applicable).",
+                "",
+            ]
+        )
     if metrics_path.is_file():
         report = read_metrics_json(metrics_path)
         if report is not None:

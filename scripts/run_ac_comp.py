@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from opamp_model.ac import extract_gain_peaking_near_gbw, plot_ac_comp
@@ -34,7 +35,7 @@ from opamp_model.report import (
     write_engine_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreNotFoundError, simulate_ac_spectre
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_ac_spectre
 
 
 def main() -> None:
@@ -48,7 +49,7 @@ def main() -> None:
     add_output_args(parser)
     args = parser.parse_args()
 
-    cfg = build_opamp_config(args)
+    cfg = replace(build_opamp_config(args), fp2_hz=200.0e6)
     noise = build_noise_config(args)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -66,7 +67,7 @@ def main() -> None:
             result = simulate_ac_spectre(cfg, out_dir, noise)
         else:
             raise ValueError(f"Unknown simulator: {args.simulator}")
-    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc
@@ -87,19 +88,24 @@ def main() -> None:
     )
 
     previous = read_metrics_json(out_dir / "opamp_metrics.json")
+    base_cfg = build_opamp_config(args)
     report = build_metrics_report(
-        cfg,
+        base_cfg,
         noise,
         engine=args.simulator,
-        ac_result=result,
     )
     report = preserve_metrics_sections(report, previous)
-    ac_entries = merge_ac_comp_entries(
-        build_ac_metric_entries(result["metrics"]),
-        comp,
-    )
+    if previous and previous.get("ac"):
+        ac_entries = merge_ac_comp_entries(previous["ac"], comp)
+    else:
+        ac_entries = merge_ac_comp_entries(
+            build_ac_metric_entries(result["metrics"]),
+            comp,
+        )
     merged = dict(report)
     merged["ac"] = ac_entries
+    if previous and previous.get("stb"):
+        merged["stb"] = previous["stb"]
     typed_report = OpampMetricsReport(**merged)
     write_metrics_json(out_dir / "opamp_metrics.json", typed_report)
 

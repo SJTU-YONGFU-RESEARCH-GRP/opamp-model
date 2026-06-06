@@ -15,11 +15,12 @@ from opamp_model.metrics import OpampMetricsReport
 DEFAULT_ENGINES = ("python", "ngspice", "spectre")
 METRICS_JSON_NAME = "opamp_metrics.json"
 
-# Peer-engine spread limits (docs/MODEL.md / PLAN.md cross-engine check).
+# Peer-engine spread limits (cross-module / cross-engine check in COMPARE_REPORT.md).
 TOLERANCE_A0_DB = 0.1
-TOLERANCE_GBW_REL = 0.05
+TOLERANCE_GBW_REL = 0.02
 TOLERANCE_PM_DEG = 2.0
-TOLERANCE_NOISE_REL = 0.05
+TOLERANCE_NOISE_REL = 0.02
+TOLERANCE_MODULE_REL = 0.02  # default 2% between python / ngspice / spectre
 
 SpreadKind = Literal["absolute", "relative", "none"]
 
@@ -60,8 +61,24 @@ COMPARE_METRICS: tuple[MetricSpec, ...] = (
         "relative",
         TOLERANCE_NOISE_REL,
     ),
-    MetricSpec("slew_pos_vps", "Slew (+)", "large_signal", "slew_pos_vps", "V/s", "relative", None),
-    MetricSpec("slew_neg_vps", "Slew (−)", "large_signal", "slew_neg_vps", "V/s", "relative", None),
+    MetricSpec(
+        "slew_pos_vps",
+        "Slew (+)",
+        "large_signal",
+        "slew_pos_vps",
+        "V/s",
+        "relative",
+        TOLERANCE_MODULE_REL,
+    ),
+    MetricSpec(
+        "slew_neg_vps",
+        "Slew (−)",
+        "large_signal",
+        "slew_neg_vps",
+        "V/s",
+        "relative",
+        TOLERANCE_MODULE_REL,
+    ),
 )
 
 GOLDEN_KEY_MAP: dict[str, str] = {
@@ -191,6 +208,19 @@ def _format_value(val: float | None, spec: MetricSpec) -> str:
     return f"{val:.6g}"
 
 
+def _format_tolerance_limit(spec: MetricSpec) -> str:
+    """Human-readable peer spread limit for one metric."""
+    if spec.tolerance is None:
+        return "—"
+    if spec.spread_kind == "relative":
+        return f"{spec.tolerance * 100:.0g}%"
+    if spec.unit == "dB":
+        return f"{spec.tolerance:g} dB"
+    if spec.unit == "deg":
+        return f"{spec.tolerance:g}°"
+    return f"{spec.tolerance:g} {spec.unit}"
+
+
 def _check_tolerance(spread: float | None, spec: MetricSpec) -> bool | None:
     if spec.tolerance is None or spread is None:
         return None
@@ -258,6 +288,14 @@ def compare_engines(
     )
 
 
+def _status_label(within_tolerance: bool | None) -> str:
+    if within_tolerance is None:
+        return "—"
+    if within_tolerance:
+        return "ok"
+    return "FAIL"
+
+
 def format_compare_table(result: CompareResult) -> str:
     """Render a plain-text comparison table."""
     engines = result.engines
@@ -265,7 +303,7 @@ def format_compare_table(result: CompareResult) -> str:
     header = ["Metric", *engines]
     if has_golden:
         header.append("ref")
-    header.extend(["Spread", "Status"])
+    header.extend(["Spread", "Limit", "Status"])
     col_w = [max(len(h), 12) for h in header]
 
     def pad(cols: list[str]) -> str:
@@ -280,12 +318,8 @@ def format_compare_table(result: CompareResult) -> str:
         if has_golden:
             cols.append(_format_value(row.golden_value, row.spec))
         cols.append(row.spread_display)
-        if row.within_tolerance is None:
-            cols.append("—")
-        elif row.within_tolerance:
-            cols.append("ok")
-        else:
-            cols.append("FAIL")
+        cols.append(_format_tolerance_limit(row.spec))
+        cols.append(_status_label(row.within_tolerance))
         lines.append(pad(cols))
 
     lines.append("")
@@ -294,5 +328,72 @@ def format_compare_table(result: CompareResult) -> str:
         for msg in result.failures:
             lines.append(f"  - {msg}")
     else:
-        lines.append("All checked spreads within docs/MODEL.md peer-engine limits.")
+        lines.append(
+            "All checked spreads within peer-engine limits "
+            f"(default {TOLERANCE_MODULE_REL * 100:.0g}% between modules where applicable)."
+        )
     return "\n".join(lines)
+
+
+def format_compare_markdown(result: CompareResult) -> str:
+    """Render a Markdown cross-engine comparison report."""
+    engines = result.engines
+    has_golden = any(row.golden_value is not None for row in result.rows)
+    header = ["Metric", *engines]
+    if has_golden:
+        header.append("ref")
+    header.extend(["Spread", "Limit", "Status"])
+
+    lines = [
+        "# Cross-engine comparison",
+        "",
+        "Peer spread across simulation modules "
+        f"(`{'`, `'.join(engines)}`). Relative metrics use a **{TOLERANCE_MODULE_REL * 100:.0g}%** "
+        "tolerance between modules unless noted otherwise.",
+        "",
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * len(header)) + " |",
+    ]
+
+    for row in result.rows:
+        cols = [row.spec.label]
+        for engine in engines:
+            cols.append(_format_value(row.engine_values.get(engine), row.spec))
+        if has_golden:
+            cols.append(_format_value(row.golden_value, row.spec))
+        cols.extend(
+            [
+                row.spread_display,
+                _format_tolerance_limit(row.spec),
+                _status_label(row.within_tolerance),
+            ]
+        )
+        lines.append("| " + " | ".join(cols) + " |")
+
+    lines.extend(["", "## Tolerance limits", ""])
+    for spec in COMPARE_METRICS:
+        limit = _format_tolerance_limit(spec)
+        if limit == "—":
+            continue
+        lines.append(f"- **{spec.label}:** {limit}")
+
+    lines.append("")
+    if result.failures:
+        lines.extend(["## Failures", ""])
+        for msg in result.failures:
+            lines.append(f"- {msg}")
+    else:
+        lines.append(
+            "All checked spreads are within peer-engine limits "
+            f"(default {TOLERANCE_MODULE_REL * 100:.0g}% between modules where applicable)."
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def write_compare_report(output_root: Path, result: CompareResult) -> Path:
+    """Write ``COMPARE_REPORT.md`` under ``output_root``."""
+    path = output_root / "COMPARE_REPORT.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_compare_markdown(result), encoding="utf-8")
+    return path

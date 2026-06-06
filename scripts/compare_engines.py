@@ -10,6 +10,7 @@ from opamp_model.compare import (
     DEFAULT_ENGINES,
     compare_engines,
     format_compare_table,
+    write_compare_report,
 )
 from opamp_model.io import package_root
 
@@ -37,6 +38,11 @@ def main() -> None:
         default=list(DEFAULT_ENGINES),
         help=f"Engines to compare (default: {' '.join(DEFAULT_ENGINES)}).",
     )
+    parser.add_argument(
+        "--no-report",
+        action="store_true",
+        help="Do not write outputs/COMPARE_REPORT.md.",
+    )
     args = parser.parse_args()
 
     root = args.output_root
@@ -53,6 +59,9 @@ def main() -> None:
         golden_path=golden,
     )
     print(format_compare_table(result))
+    if not args.no_report:
+        report_path = write_compare_report(root, result)
+        print(f"Wrote {report_path}")
     if not result.passed:
         raise SystemExit(1)
 

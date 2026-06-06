@@ -28,7 +28,7 @@ from opamp_model.report import (
     write_engine_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreNotFoundError, simulate_ac_spectre
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_ac_spectre
 
 
 def main() -> None:
@@ -58,7 +58,7 @@ def main() -> None:
             result = simulate_ac_spectre(cfg, out_dir, noise)
         else:
             raise ValueError(f"Unknown simulator: {args.simulator}")
-    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc

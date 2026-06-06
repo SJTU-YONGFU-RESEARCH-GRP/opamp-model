@@ -186,7 +186,7 @@ I(inp, inn) <+ flicker_noise(EN_FLICKER_PWR_1HZ, EN_FLICKER_EF, "flicker");
 
 Spectre ``noise_open_loop.scs`` and ngspice decks pass these at render time. Engine merge rules:
 
-- **spectre:** read white + flicker from PSF ``.noise`` when VA sources are active; skip Python flicker post-merge.
+- **spectre:** open-loop AC gain from the companion ``ac`` analysis × ``OpampNoiseConfig`` input-referred density (same as ngspice). VA ``white_noise`` / ``flicker_noise`` do not propagate through ``laplace_nd`` in Spectre ``.noise``.
 - **ngspice:** thermal from ``RN``; flicker from VA when the deck includes ``flicker_noise``; else config merge (today).
 
 ### Large-signal (Python TRAN)
@@ -232,9 +232,9 @@ All engines must implement the **same** equations in this document; none is auth
 | --- | --- | --- | --- |
 | **python** | — | ``noise.py`` × ``|A_open(f)|`` | Macromodel for ``--simulator python`` only |
 | **ngspice** | ``testbench/ngspice/noise_open_loop.cir`` | ngspice AC gain × ``input_referred_en`` (config) | Ideal VCVS (``E``) does not amplify resistor noise in ``.noise``; thermal ``Rn`` runs; flicker from ``OpampNoiseConfig`` |
-| **spectre** | ``testbench/spectre/noise_open_loop.scs`` | Output noise PSF + VA ``flicker_noise`` (Phase 3) | White via ``RN`` + ``white_noise``; flicker native in VA when ``EN_FLICKER_PWR_1HZ > 0`` |
+| **spectre** | ``testbench/spectre/noise_open_loop.scs`` | Spectre AC gain × ``input_referred_en`` (config) | VA ``white_noise`` / ``flicker_noise`` do not propagate through ``laplace_nd`` in ``.noise``; same post-processing as ngspice |
 
-Until Phase 3 is complete, engines may still merge flicker from ``OpampNoiseConfig`` after PSF read. Do not use the Python noise bench as a golden reference for ngspice/Spectre until VA flicker and controlled-source noise transfer are both active in netlists.
+Spectre and ngspice both derive output-referred noise from the companion AC sweep and ``OpampNoiseConfig`` input-referred density. The Python noise bench remains the reference macromodel for ``--simulator python`` only.
 
 ``docs/golden_metrics.yaml`` holds optional transistor-level reference targets for future ``compare_engines.py``; it is **not** an engine truth file.
 

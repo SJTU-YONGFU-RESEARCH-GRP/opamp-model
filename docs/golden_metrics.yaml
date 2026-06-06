@@ -1,7 +1,7 @@
 # Optional reference targets (populate from transistor-level sim or lab data).
 # NOT an engine truth file — scripts/compare_engines.py prints these as a "ref" column only.
-# Pass/fail is peer spread (python / ngspice / spectre) vs docs/MODEL.md limits:
-#   A0 ≤ 0.1 dB, GBW ≤ 5%, phase margin ≤ 2°, integrated noise RMS ≤ 5%.
+# Pass/fail is peer spread (python / ngspice / spectre) vs compare limits:
+#   A0 ≤ 0.1 dB, GBW ≤ 2%, phase margin ≤ 2°, integrated noise RMS ≤ 2%, slew ≤ 2%.
 # Keys map to opamp_metrics.json fields (slew_v_per_us → slew_pos/neg_vps in V/s).
 #
 # Flicker noise (Phase 1): en_flicker_1hz is true density at 1 Hz (paper pwr / Spectre
@@ -18,12 +18,12 @@
 
 a0_db: 80.0
 gbw_hz: 10.0e6
-phase_margin_deg: 60.0
+phase_margin_deg: 90.0
 gain_margin_db: null  # optional; may be absent if no -180 deg crossing
 cmrr_db: 90.0
 psrr_db: 80.0
 psrr_pole_hz: 100.0
-fp2_hz: 200.0e6
+fp2_hz: 0.0  # Python-only when > 0; default macromodel is one-pole (see run_ac_comp.py)
 fz_hz: 0.0
 rin_ohm: 1.0e12
 cin_f: 1.0e-12

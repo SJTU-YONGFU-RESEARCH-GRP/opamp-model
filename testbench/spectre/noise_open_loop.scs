@@ -36,7 +36,7 @@ VSS (vss 0) vsource dc=0.0
 VCM (inn 0) vsource dc=0.9 type=dc
 
 VAC (inp 0) vsource dc=0.9 type=sine ampl=1m freq=0 \
-    acmag=1 acphase=0
+    mag=1 phase=0
 
 RN (inp inn) resistor r=rn_white_ohm
 
@@ -48,6 +48,7 @@ XOP (inp inn out vdd vss) configurable_opamp \
     ENABLE_NOISE=enable_noise
 
 ROUT (out 0) resistor r=rout_ohm
+COUT (out 0) capacitor c=cout_f
 
 save out
 ac ac start=f_start stop=f_stop dec=dec annotate=status

@@ -26,7 +26,7 @@ from opamp_model.report import (
 )
 from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, log_run_context
-from opamp_model.spectre_engine import SpectreNotFoundError, run_spectre_tran_stub
+from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, run_spectre_tran_stub
 from opamp_model.tran import (
     measure_slew_rates,
     plot_slew_step,
@@ -136,7 +136,7 @@ def main() -> None:
                 template_name="slew_stub.scs",
                 log_name="spectre_slew_stub.log",
             )
-    except (NgspiceNotFoundError, SpectreNotFoundError) as exc:
+    except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc

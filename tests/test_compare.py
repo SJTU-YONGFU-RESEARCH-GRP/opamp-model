@@ -10,12 +10,15 @@ import pytest
 from opamp_model.compare import (
     TOLERANCE_A0_DB,
     TOLERANCE_GBW_REL,
+    TOLERANCE_MODULE_REL,
     TOLERANCE_NOISE_REL,
     TOLERANCE_PM_DEG,
     compare_engines,
     compute_spread,
+    format_compare_markdown,
     format_compare_table,
     load_engine_metrics,
+    write_compare_report,
 )
 from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.io import package_root
@@ -100,7 +103,7 @@ def test_compare_fails_a0_spread(tmp_path: Path) -> None:
 
 
 def test_compare_fails_gbw_spread(tmp_path: Path) -> None:
-    """GBW relative spread above 5% fails."""
+    """GBW relative spread above 2% fails."""
     base = 10e6
     high = base * (1.0 + TOLERANCE_GBW_REL + 0.01)
     _write_metrics(tmp_path / "python" / "opamp_metrics.json", _minimal_report(engine="python"))
@@ -128,7 +131,7 @@ def test_compare_fails_pm_spread(tmp_path: Path) -> None:
 
 
 def test_compare_fails_noise_spread(tmp_path: Path) -> None:
-    """Integrated noise RMS spread above 5% fails."""
+    """Integrated noise RMS spread above 2% fails."""
     base = 0.01
     high = base * (1.0 + TOLERANCE_NOISE_REL + 0.02)
     _write_metrics(tmp_path / "python" / "opamp_metrics.json", _minimal_report(engine="python"))
@@ -159,3 +162,33 @@ def test_golden_column_optional(tmp_path: Path) -> None:
 def test_load_engine_metrics_missing(tmp_path: Path) -> None:
     """Missing metrics file returns None."""
     assert load_engine_metrics(tmp_path, "python") is None
+
+
+def test_compare_table_includes_limit_column(tmp_path: Path) -> None:
+    """Plain-text table shows per-metric spread limits."""
+    for engine in ("python", "ngspice"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path, engines=("python", "ngspice"))
+    text = format_compare_table(result)
+    assert "Limit" in text
+    assert f"{TOLERANCE_MODULE_REL * 100:.0g}%" in text
+    assert f"{TOLERANCE_A0_DB:g} dB" in text
+
+
+def test_write_compare_report_markdown(tmp_path: Path) -> None:
+    """COMPARE_REPORT.md includes spread table and 2% module tolerance note."""
+    for engine in ("python", "ngspice"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path, engines=("python", "ngspice"))
+    path = write_compare_report(tmp_path, result)
+    text = path.read_text(encoding="utf-8")
+    assert path.name == "COMPARE_REPORT.md"
+    assert "Cross-engine comparison" in text
+    assert f"{TOLERANCE_GBW_REL * 100:.0g}%" in text
+    assert format_compare_markdown(result) == text

@@ -49,7 +49,7 @@ def test_single_pole_phase_margin() -> None:
     gain_db = 20.0 * np.log10(np.abs(h))
     phase_deg = np.angle(h, deg=True)
     metrics = extract_gbw_phase_margin(f, gain_db, phase_deg)
-    assert metrics["phase_margin_deg"] == pytest.approx(90.0, abs=10.0)
+    assert metrics["phase_margin_deg"] == pytest.approx(90.0, abs=1.0)
 
 
 def test_stb_scales_with_loop_beta() -> None:

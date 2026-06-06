@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -16,19 +17,30 @@ from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.io import package_root, write_bode_csv
 from opamp_model.io import log_frequency_sweep
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
-from opamp_model.noise import flicker_voltage_density, input_referred_en
+from opamp_model.ngspice_engine import ngspice_output_noise_spectrum
 from opamp_model.noise_analysis import extract_noise_metrics
 from opamp_model.spectre_psf import (
     SpectrePsfError,
     locate_ac_psf,
     locate_noise_psf,
     read_spectre_ac_from_netlists,
-    read_spectre_noise_from_netlists,
 )
 
 
 class SpectreNotFoundError(RuntimeError):
     """Raised when the ``spectre`` executable is not on PATH."""
+
+
+class SpectreLicenseError(RuntimeError):
+    """Raised when Spectre is installed but the license file/server is unavailable."""
+
+
+_DEFAULT_CDS_LIC_FILE = Path("/eda/cadence/license.dat")
+_LICENSE_FAILURE_MARKERS = (
+    "LMC-01902",
+    "Failed to initialize license API",
+    "Can't find license file",
+)
 
 
 _SCS_INCLUDE = re.compile(
@@ -51,6 +63,52 @@ def find_spectre_executable() -> str:
     raise SpectreNotFoundError(
         "Cadence Spectre not found on PATH. Install Spectre or use --simulator python."
     )
+
+
+def spectre_is_runnable() -> bool:
+    """Return True when Spectre exists and a license file/env is configured."""
+    try:
+        find_spectre_executable()
+    except SpectreNotFoundError:
+        return False
+    if os.environ.get("CDS_LIC_FILE") or os.environ.get("LM_LICENSE_FILE"):
+        return True
+    return _DEFAULT_CDS_LIC_FILE.is_file()
+
+
+def _spectre_subprocess_env() -> dict[str, str]:
+    """Build subprocess env with Spectre bin on PATH and a default license file."""
+    env = os.environ.copy()
+    executable = find_spectre_executable()
+    spectre_bin = str(Path(executable).parent)
+    env["PATH"] = f"{spectre_bin}:{env.get('PATH', '')}"
+    if not env.get("CDS_LIC_FILE") and _DEFAULT_CDS_LIC_FILE.is_file():
+        env["CDS_LIC_FILE"] = str(_DEFAULT_CDS_LIC_FILE)
+    return env
+
+
+def _raise_if_spectre_license_failure(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    log_path: Path,
+) -> None:
+    """Raise ``SpectreLicenseError`` when Spectre output indicates license failure."""
+    output = completed.stdout + completed.stderr
+    if any(marker in output for marker in _LICENSE_FAILURE_MARKERS):
+        raise SpectreLicenseError(f"Cadence Spectre license unavailable; see {log_path}")
+
+
+def _raise_if_spectre_failed(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    log_path: Path,
+    message: str,
+) -> None:
+    """Raise on Spectre failure, distinguishing license errors from other faults."""
+    if completed.returncode == 0:
+        return
+    _raise_if_spectre_license_failure(completed, log_path=log_path)
+    raise RuntimeError(f"{message} with code {completed.returncode}; see {log_path}")
 
 
 def _format_param(value: float | int) -> str:
@@ -203,6 +261,7 @@ def run_spectre_netlist(
         text=True,
         check=False,
         timeout=timeout_s,
+        env=_spectre_subprocess_env(),
     )
 
 
@@ -237,9 +296,11 @@ def run_spectre_ac(
     csv_path = output_dir / ("stb_bode.csv" if stem == "stb_loop" else "ac_bode.csv")
     completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
     log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
-    if completed.returncode != 0:
-        msg = f"Spectre failed with code {completed.returncode}; see {log_path}"
-        raise RuntimeError(msg)
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre failed",
+    )
 
     try:
         bode = read_spectre_ac_from_netlists(logs_dir, stem=stem, signal="out")
@@ -327,9 +388,11 @@ def run_spectre_noise(
     log_path = output_dir / "logs" / f"spectre_{stem}.log"
     completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
     log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
-    if completed.returncode != 0:
-        msg = f"Spectre noise failed with code {completed.returncode}; see {log_path}"
-        raise RuntimeError(msg)
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre noise failed",
+    )
     raw_dir = locate_noise_psf(logs_dir, stem=stem).raw_dir
     return SpectreNoiseResult(
         netlist_path=netlist_path,
@@ -343,49 +406,33 @@ def simulate_noise_spectre(
     output_dir: Path,
     noise: OpampNoiseConfig,
 ) -> NoiseSimulationResult:
-    """Run Spectre noise bench; spectrum parsed from noise PSF."""
+    """Run Spectre noise bench; output spectrum from AC gain × input-referred noise.
+
+    Spectre ``.noise`` on this bench does not propagate Verilog-A ``white_noise`` /
+    ``flicker_noise`` through ``laplace_nd`` (PSF output noise is near zero). The
+    same post-processing as ngspice is used: open-loop AC gain from the companion
+    ``ac`` analysis times ``OpampNoiseConfig`` input-referred density.
+    """
     artifacts = run_spectre_noise(cfg, noise, output_dir)
     _ = artifacts
     logs_dir = output_dir / "logs" / "netlists"
     try:
-        parsed = read_spectre_noise_from_netlists(
-            logs_dir,
-            stem="noise_open_loop",
-            signal="out",
-        )
         ac = read_spectre_ac_from_netlists(logs_dir, stem="noise_open_loop", signal="out")
     except SpectrePsfError as exc:
-        msg = f"Spectre noise PSF read failed: {exc}"
+        msg = f"Spectre noise AC PSF read failed: {exc}"
         raise RuntimeError(msg) from exc
     frequency_hz = log_frequency_sweep(
         cfg.sweep.f_start_hz,
         cfg.sweep.f_stop_hz,
         cfg.sweep.points_per_decade,
     )
-    log_f = np.log10(frequency_hz)
-    log_sim = np.log10(np.maximum(parsed["frequency_hz"], 1.0e-30))
-    onoise = np.interp(
-        log_f,
-        log_sim,
-        parsed["noise_v_per_sqrt_hz"],
-    ).astype(np.float64)
-    log_ac = np.log10(np.maximum(ac["frequency_hz"], 1.0e-30))
-    gain_lin = 10.0 ** (
-        np.interp(log_f, log_ac, ac["gain_db"]) / 20.0
+    spectrum = ngspice_output_noise_spectrum(
+        cfg,
+        noise,
+        frequency_hz=frequency_hz,
+        gain_db=ac["gain_db"],
+        ac_frequency_hz=ac["frequency_hz"],
     )
-    va_white = _va_intrinsic_white(noise)
-    va_flicker = _va_intrinsic_flicker(noise)
-    if va_white and va_flicker:
-        spectrum = onoise.astype(np.float64)
-    elif va_flicker:
-        spectrum = onoise.astype(np.float64)
-    elif va_white:
-        flicker_v = flicker_voltage_density(frequency_hz, noise)
-        spectrum = np.sqrt(onoise**2 + (flicker_v * gain_lin) ** 2).astype(np.float64)
-    else:
-        en_in = input_referred_en(frequency_hz, noise)
-        flicker_only = np.maximum(en_in**2 - noise.en_white_v_per_sqrt_hz**2, 0.0)
-        spectrum = np.sqrt(onoise**2 + flicker_only * gain_lin**2).astype(np.float64)
     metrics = extract_noise_metrics(cfg, noise, frequency_hz, spectrum)
     return NoiseSimulationResult(
         frequency_hz=frequency_hz,
@@ -411,8 +458,10 @@ def run_spectre_tran_stub(
     log_path = output_dir / "logs" / log_name
     completed = run_spectre_netlist(netlist_path, cwd=logs_dir)
     log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
-    if completed.returncode != 0:
-        msg = f"Spectre TRAN stub failed with code {completed.returncode}; see {log_path}"
-        raise RuntimeError(msg)
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre TRAN stub failed",
+    )
     _ = cfg
     return log_path

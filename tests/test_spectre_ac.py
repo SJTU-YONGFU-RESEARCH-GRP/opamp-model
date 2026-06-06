@@ -14,6 +14,7 @@ from opamp_model.spectre_engine import (
     SpectreNotFoundError,
     find_spectre_executable,
     simulate_ac_spectre,
+    spectre_is_runnable,
 )
 from opamp_model.spectre_psf import (
     locate_ac_psf,
@@ -57,6 +58,17 @@ def fixture_psf_path() -> Path | None:
 def test_find_spectre() -> None:
     """Spectre executable is discoverable."""
     assert find_spectre_executable()
+
+
+def test_spectre_is_runnable_with_default_license(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default ``/eda/cadence/license.dat`` makes Spectre runnable when env is unset."""
+    if not _spectre_available():
+        pytest.skip("Spectre not available")
+    if not Path("/eda/cadence/license.dat").is_file():
+        pytest.skip("Default Cadence license file not present")
+    monkeypatch.delenv("CDS_LIC_FILE", raising=False)
+    monkeypatch.delenv("LM_LICENSE_FILE", raising=False)
+    assert spectre_is_runnable()
 
 
 def test_read_psf_frequency_sweep(fixture_psf_path: Path | None) -> None:
