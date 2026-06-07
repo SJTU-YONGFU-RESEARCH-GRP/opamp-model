@@ -16,8 +16,8 @@ from opamp_model.cli_helpers import (
     build_opamp_config,
     resolve_engine_label,
 )
-from opamp_model.io import package_root, write_bode_csv, write_cmrr_csv
 from opamp_model.impedance import plot_impedance
+from opamp_model.io import package_root, write_bode_csv, write_cmrr_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
 from opamp_model.model import simulate_ac
 from opamp_model.ngspice_engine import (

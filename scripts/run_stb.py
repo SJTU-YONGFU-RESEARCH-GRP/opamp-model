@@ -19,16 +19,20 @@ from opamp_model.cli_helpers import (
 )
 from opamp_model.io import package_root, write_bode_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
+from opamp_model.model import AcSimulationResult, simulate_stb
+from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_ac_ngspice
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
     write_engine_report,
     write_stb_report,
 )
-from opamp_model.model import AcSimulationResult, simulate_stb
-from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_ac_ngspice
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_ac_spectre
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_ac_spectre,
+)
 
 
 def _scale_loop_gain(result: AcSimulationResult, loop_beta: float) -> AcSimulationResult:

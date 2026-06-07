@@ -1,0 +1,21 @@
+// Unity-gain follower slew — Spectre behavioral macromodel (Python tran.py parity).
+//
+// Run via: python scripts/run_slew.py --simulator spectre
+
+simulator lang=spectre
+
+parameters vcm=PLACEHOLDER_VCM
+parameters step_v=PLACEHOLDER_STEP
+parameters tstop=PLACEHOLDER_TSTOP
+parameters tstep=PLACEHOLDER_TSTEP
+parameters pulse_period=PLACEHOLDER_PULSE_PERIOD
+
+VIN (vin 0) vsource type=pulse val0=vcm val1=vcm+step_v period=pulse_period rise=1p fall=1p width=tstop
+Bs (0 n) bsource i=PLACEHOLDER_BS_EXPR
+Cn (n 0) capacitor c=1 ic=vcm
+Rgnd (n 0) resistor r=1e12
+Eout (out 0 n 0) vcvs gain=1
+ROUT (out 0) resistor r=100
+
+save out
+tran tran stop=tstop step=tstep

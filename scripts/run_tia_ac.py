@@ -27,7 +27,11 @@ from opamp_model.report import (
     write_tia_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_tia_ac_spectre
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_tia_ac_spectre,
+)
 from opamp_model.tia import plot_zt, simulate_tia_ac
 
 

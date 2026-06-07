@@ -13,22 +13,34 @@ import numpy as np
 from numpy.typing import NDArray
 
 from opamp_model.ac import cmrr_from_aol_and_acm, extract_gbw_phase_margin
-from opamp_model.cm_ps import PsrrSimulationResult, psrr_db_from_transfer
+from opamp_model.core import dominant_pole_rad_s
+from opamp_model.cm_ps import CmrrSimulationResult, PsrrSimulationResult, psrr_db_from_transfer
 from opamp_model.config import BenchSweepConfig, GmConfig, OpampConfig, OpampNoiseConfig, TiaConfig
-from opamp_model.io import package_root, write_bode_csv, write_psrr_csv
-from opamp_model.io import log_frequency_sweep
-from opamp_model.cm_ps import CmrrSimulationResult
-from opamp_model.model import AcSimulationResult, NoiseSimulationResult
 from opamp_model.gm import GmAcSimulationResult, bode_to_gm_result
-from opamp_model.ngspice_engine import ngspice_output_noise_spectrum
-from opamp_model.tia import TiaSimulationResult, bode_to_tia_result
+from opamp_model.io import log_frequency_sweep, package_root, write_bode_csv, write_psrr_csv
+from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.ngspice_engine import merge_engine_noise_spectrum
 from opamp_model.noise_analysis import extract_noise_metrics
 from opamp_model.spectre_psf import (
     SpectrePsfError,
     locate_ac_psf,
     locate_noise_psf,
     read_spectre_ac_from_netlists,
+    read_spectre_noise_from_netlists,
     read_spectre_psrr_from_netlists,
+    read_spectre_tran_from_netlists,
+)
+from opamp_model.tia import TiaSimulationResult, bode_to_tia_result
+from opamp_model.tran import (
+    SlewMetrics,
+    ThdMetrics,
+    TranSineResult,
+    TranStepResult,
+    compute_thd,
+    extract_slew_rate,
+    is_thd_ideal,
+    overlay_transient_noise_on_sine,
+    overlay_transient_noise_on_step,
 )
 
 
@@ -301,13 +313,18 @@ def run_spectre_netlist(
     *,
     cwd: Path | None = None,
     timeout_s: float | None = None,
+    psf_format: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run Spectre on a rendered ``.scs`` netlist."""
     executable = find_spectre_executable()
-    args = [executable, str(netlist), "+log", "status"]
+    work_dir = (cwd or netlist.parent).resolve()
+    netlist_arg = netlist.name if netlist.resolve().parent == work_dir else str(netlist.resolve())
+    args = [executable, netlist_arg, "+log", "status"]
+    if psf_format is not None:
+        args.extend(["-format", psf_format])
     return subprocess.run(
         args,
-        cwd=cwd or netlist.parent,
+        cwd=work_dir,
         capture_output=True,
         text=True,
         check=False,
@@ -612,39 +629,39 @@ def simulate_noise_spectre(
     output_dir: Path,
     noise: OpampNoiseConfig,
 ) -> NoiseSimulationResult:
-    """Run Spectre noise bench; output spectrum from AC gain × input-referred noise.
-
-    Spectre ``.noise`` on this bench does not propagate Verilog-A ``white_noise`` /
-    ``flicker_noise`` through ``laplace_nd`` (PSF output noise is near zero). The
-    same post-processing as ngspice is used: open-loop AC gain from the companion
-    ``ac`` analysis times ``OpampNoiseConfig`` input-referred density.
-    """
+    """Run Spectre noise bench; merge native PSF with AC-gain spectrum."""
     artifacts = run_spectre_noise(cfg, noise, output_dir)
-    _ = artifacts
     logs_dir = output_dir / "logs" / "netlists"
     try:
         ac = read_spectre_ac_from_netlists(logs_dir, stem="noise_open_loop", signal="out")
+        native = read_spectre_noise_from_netlists(logs_dir, stem="noise_open_loop")
     except SpectrePsfError as exc:
-        msg = f"Spectre noise AC PSF read failed: {exc}"
+        msg = f"Spectre noise PSF read failed: {exc}"
         raise RuntimeError(msg) from exc
     frequency_hz = log_frequency_sweep(
         cfg.sweep.f_start_hz,
         cfg.sweep.f_stop_hz,
         cfg.sweep.points_per_decade,
     )
-    spectrum = ngspice_output_noise_spectrum(
+    spectrum, _ = merge_engine_noise_spectrum(
         cfg,
         noise,
         frequency_hz=frequency_hz,
         gain_db=ac["gain_db"],
         ac_frequency_hz=ac["frequency_hz"],
+        native_onoise=native["noise_v_per_sqrt_hz"],
+        native_frequency_hz=native["frequency_hz"],
     )
+    _ = artifacts
     metrics = extract_noise_metrics(cfg, noise, frequency_hz, spectrum)
     return NoiseSimulationResult(
         frequency_hz=frequency_hz,
         noise_v_per_sqrt_hz=spectrum,
         metrics=metrics,
     )
+
+
+_TIA_CLP_REF_F = 1.0e-12
 
 
 def render_spectre_tia_netlist(
@@ -657,16 +674,28 @@ def render_spectre_tia_netlist(
     """Render a Spectre TIA AC netlist with CLI macromodel settings."""
     root = repo_root or package_root()
     text = template_path.read_text(encoding="utf-8")
+    a0 = max(cfg.a0_linear, 1.0)
+    wp = dominant_pole_rad_s(cfg)
+    clp_f = _TIA_CLP_REF_F
+    rlp_ohm = 1.0 / (wp * clp_f)
+    cshunt_f = cfg.cin_f + tia.cs_f
+    # Norton injection: Z_in ≈ Rf/A0 at low frequency → scale V_inj for 1 A AC.
+    iinj_mag = 1.0 + tia.rf_ohm / a0
     overrides = {
         "rf_ohm": _format_param(tia.rf_ohm),
         "cf_f": _format_param(tia.cf_f),
         "cs_f": _format_param(tia.cs_f),
         "a0_db": _format_param(cfg.a0_db),
         "gbw_hz": _format_param(cfg.gbw_hz),
+        "a0_linear": _format_param(a0),
+        "rlp_ohm": _format_param(rlp_ohm),
+        "clp_f": _format_param(clp_f),
         "rin_ohm": _format_param(cfg.rin_ohm),
         "cin_f": _format_param(cfg.cin_f),
+        "cshunt_f": _format_param(cshunt_f),
         "rout_ohm": _format_param(cfg.rout_ohm),
         "cout_f": _format_param(cfg.cout_f),
+        "iinj_mag": _format_param(iinj_mag),
         "f_start": _format_param(cfg.sweep.f_start_hz),
         "f_stop": _format_param(cfg.sweep.f_stop_hz),
         "dec": _format_param(cfg.sweep.points_per_decade),
@@ -678,7 +707,12 @@ def render_spectre_tia_netlist(
             text,
             flags=re.MULTILINE,
         )
-    return _absolutize_spectre_includes(text, root)
+    return (
+        text.replace("PLACEHOLDER_A0", _format_param(a0))
+        .replace("PLACEHOLDER_RLP", _format_param(rlp_ohm))
+        .replace("PLACEHOLDER_CLP", _format_param(clp_f))
+        .replace("PLACEHOLDER_IINJ", _format_param(iinj_mag))
+    )
 
 
 def run_spectre_tia_ac(
@@ -861,6 +895,256 @@ def simulate_gm_ac_spectre(
         bode["gain_db"],
         bode["phase_deg"],
     )
+
+
+def render_spectre_slew_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    *,
+    step_v: float,
+    duration_s: float,
+    dt_s: float,
+    repo_root: Path | None = None,
+) -> str:
+    """Render Spectre unity-gain follower slew transient netlist."""
+    import math
+
+    _ = repo_root
+    gm = 2.0 * math.pi * cfg.gbw_hz
+    slew_pos = abs(cfg.slew_pos_vps)
+    slew_neg = cfg.slew_neg_vps if cfg.slew_neg_vps < 0.0 else -abs(cfg.slew_neg_vps)
+    bs_expr = f"min(max({_format_param(gm)}*(v(vin)-v(n)), {_format_param(slew_neg)}), {_format_param(slew_pos)})"
+    pulse_period = max(duration_s * 4.0, duration_s + 1.0e-9)
+    return (
+        template_path.read_text(encoding="utf-8")
+        .replace("PLACEHOLDER_VCM", _format_param(cfg.vcm_v))
+        .replace("PLACEHOLDER_STEP", _format_param(step_v))
+        .replace("PLACEHOLDER_BS_EXPR", bs_expr)
+        .replace("PLACEHOLDER_TSTOP", _format_param(duration_s))
+        .replace("PLACEHOLDER_TSTEP", _format_param(dt_s))
+        .replace("PLACEHOLDER_PULSE_PERIOD", _format_param(pulse_period))
+    )
+
+
+def run_spectre_slew_step(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    step_v: float,
+    duration_s: float,
+    dt_s: float,
+    stem: str,
+    template_name: str = "slew_follower.scs",
+) -> Path:
+    """Run one Spectre slew step transient and return the netlist directory."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / f"{stem}.scs"
+    netlist_path.write_text(
+        render_spectre_slew_netlist(
+            template,
+            cfg,
+            step_v=step_v,
+            duration_s=duration_s,
+            dt_s=dt_s,
+            repo_root=repo,
+        ),
+        encoding="utf-8",
+    )
+    log_path = output_dir / "logs" / f"spectre_{stem}.log"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir, psf_format="psfascii")
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message=f"Spectre slew TRAN failed ({stem})",
+    )
+    return logs_dir
+
+
+def _spectre_tran_step_from_netlists(
+    netlists_dir: Path,
+    *,
+    stem: str,
+) -> TranStepResult:
+    """Build a ``TranStepResult`` from Spectre slew PSF."""
+    data = read_spectre_tran_from_netlists(netlists_dir, stem=stem, signal="out")
+    zeros = np.zeros_like(data["signal_v"], dtype=np.float64)
+    return TranStepResult(
+        time_s=data["time_s"],
+        vout_v=data["signal_v"],
+        vout_clean_v=data["signal_v"],
+        noise_v=zeros,
+    )
+
+
+def simulate_slew_spectre(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    step_v: float = 0.8,
+    duration_s: float = 2.0e-6,
+    dt_s: float = 1.0e-9,
+    noise: OpampNoiseConfig | None = None,
+) -> tuple[SlewMetrics, TranStepResult, TranStepResult]:
+    """Run positive/negative slew steps in Spectre and extract slew rates."""
+    netlists_dir = run_spectre_slew_step(
+        cfg,
+        output_dir,
+        step_v=step_v,
+        duration_s=duration_s,
+        dt_s=dt_s,
+        stem="slew_pos",
+    )
+    pos = overlay_transient_noise_on_step(
+        _spectre_tran_step_from_netlists(netlists_dir, stem="slew_pos"),
+        cfg,
+        noise,
+    )
+    run_spectre_slew_step(
+        cfg,
+        output_dir,
+        step_v=-step_v,
+        duration_s=duration_s,
+        dt_s=dt_s,
+        stem="slew_neg",
+    )
+    neg = overlay_transient_noise_on_step(
+        _spectre_tran_step_from_netlists(netlists_dir, stem="slew_neg"),
+        cfg,
+        noise,
+    )
+    vfinal_pos = float(
+        np.clip(cfg.vcm_v + step_v, cfg.vswing_low_v, cfg.vswing_high_v)
+    )
+    vfinal_neg = float(
+        np.clip(cfg.vcm_v - step_v, cfg.vswing_low_v, cfg.vswing_high_v)
+    )
+    sr_pos, _ = extract_slew_rate(pos["time_s"], pos["vout_clean_v"], vfinal_pos)
+    _, sr_neg = extract_slew_rate(neg["time_s"], neg["vout_clean_v"], vfinal_neg)
+    metrics = SlewMetrics(
+        slew_pos_vps=float(sr_pos),
+        slew_neg_vps=float(sr_neg),
+    )
+    return metrics, pos, neg
+
+
+def render_spectre_thd_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    repo_root: Path | None = None,
+) -> str:
+    """Render Spectre open-loop THD transient netlist."""
+    _ = repo_root
+    duration_s = cycles / freq_hz
+    a0 = max(cfg.a0_linear, 1.0)
+    poly_expr = (
+        f"{_format_param(a0)}*(v(inp)-v(inn))"
+        f"+{_format_param(cfg.nl_a2)}*(v(inp)-v(inn))*(v(inp)-v(inn))"
+        f"+{_format_param(cfg.nl_a3)}*(v(inp)-v(inn))*(v(inp)-v(inn))*(v(inp)-v(inn))"
+    )
+    return (
+        template_path.read_text(encoding="utf-8")
+        .replace("PLACEHOLDER_VCM", _format_param(cfg.vcm_v))
+        .replace("PLACEHOLDER_AMP", _format_param(amplitude_v))
+        .replace("PLACEHOLDER_FREQ", _format_param(freq_hz))
+        .replace("PLACEHOLDER_POLY_EXPR", poly_expr)
+        .replace("PLACEHOLDER_TSTOP", _format_param(duration_s))
+        .replace("PLACEHOLDER_TSTEP", _format_param(dt_s))
+    )
+
+
+def run_spectre_thd(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    template_name: str = "thd_open_loop.scs",
+) -> Path:
+    """Run Spectre THD transient and return the netlist directory."""
+    repo = package_root()
+    template = repo / "testbench" / "spectre" / template_name
+    logs_dir = output_dir / "logs" / "netlists"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = logs_dir / template_name
+    netlist_path.write_text(
+        render_spectre_thd_netlist(
+            template,
+            cfg,
+            amplitude_v=amplitude_v,
+            freq_hz=freq_hz,
+            cycles=cycles,
+            dt_s=dt_s,
+            repo_root=repo,
+        ),
+        encoding="utf-8",
+    )
+    log_path = output_dir / "logs" / "spectre_thd.log"
+    completed = run_spectre_netlist(netlist_path, cwd=logs_dir, psf_format="psfascii")
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    _raise_if_spectre_failed(
+        completed,
+        log_path=log_path,
+        message="Spectre THD TRAN failed",
+    )
+    return logs_dir
+
+
+def simulate_thd_spectre(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    ideal_flag: bool = False,
+    noise: OpampNoiseConfig | None = None,
+) -> tuple[TranSineResult, ThdMetrics | None]:
+    """Run Spectre THD transient and compute distortion metrics from PSF."""
+    netlists_dir = run_spectre_thd(
+        cfg,
+        output_dir,
+        amplitude_v=amplitude_v,
+        freq_hz=freq_hz,
+        cycles=cycles,
+        dt_s=dt_s,
+    )
+    data = read_spectre_tran_from_netlists(
+        netlists_dir,
+        stem="thd_open_loop",
+        signal="out",
+    )
+    zeros = np.zeros_like(data["signal_v"], dtype=np.float64)
+    sine = TranSineResult(
+        time_s=data["time_s"],
+        vout_v=data["signal_v"],
+        vout_clean_v=data["signal_v"],
+        noise_v=zeros,
+    )
+    sine = overlay_transient_noise_on_sine(
+        sine,
+        cfg,
+        noise,
+        amplitude_v=amplitude_v,
+        freq_hz=freq_hz,
+    )
+    thd = None if is_thd_ideal(cfg, ideal_flag=ideal_flag) else compute_thd(
+        sine["time_s"],
+        sine["vout_v"],
+        freq_hz,
+    )
+    return sine, thd
 
 
 def run_spectre_tran_stub(

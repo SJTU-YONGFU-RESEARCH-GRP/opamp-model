@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import numpy as np
 
 from opamp_model.ac import AcCompMetrics, AcMetrics
 from opamp_model.cm_ps import CmrrSimulationResult, PsrrSimulationResult
 from opamp_model.config import OpampConfig, OpampNoiseConfig
-from opamp_model.noise import flicker_corner_frequency, flicker_voltage_density
-from opamp_model.impedance import zin_diff, zout as zout_model
-from opamp_model.model import AcSimulationResult, NoiseSimulationResult
 from opamp_model.gm import GmAcSimulationResult, GmMetrics
+from opamp_model.impedance import zin_diff
+from opamp_model.impedance import zout as zout_model
+from opamp_model.model import AcSimulationResult, NoiseSimulationResult
+from opamp_model.noise import flicker_corner_frequency, flicker_voltage_density
 from opamp_model.tia import TiaMetrics, TiaSimulationResult
 from opamp_model.tran import ThdMetrics, is_thd_ideal
 
@@ -24,6 +25,8 @@ PARITY_SKIP_SOURCES = frozenset(
         "python_macromodel",
         "tran_scaffold",
         "hybrid_noise_merge",
+        "ac_noise_merge",
+        "hybrid_tia_merge",
     }
 )
 
@@ -109,8 +112,10 @@ def _noise_metric_source(engine: str) -> str:
     """Provenance for simulated noise scalars."""
     if engine == "python":
         return "python_macromodel"
-    if engine in ("ngspice", "spectre"):
-        return "hybrid_noise_merge"
+    if engine == "ngspice":
+        return "ngspice_noise_merge"
+    if engine == "spectre":
+        return "spectre_noise_merge"
     return "python_macromodel"
 
 
@@ -118,8 +123,10 @@ def _tran_metric_source(engine: str) -> str:
     """Provenance for TRAN slew/THD scalars."""
     if engine == "python":
         return "python_macromodel"
-    if engine in ("ngspice", "spectre"):
-        return "tran_scaffold"
+    if engine == "ngspice":
+        return "ngspice_tran_wrdata"
+    if engine == "spectre":
+        return "spectre_tran_psf"
     return "python_macromodel"
 
 

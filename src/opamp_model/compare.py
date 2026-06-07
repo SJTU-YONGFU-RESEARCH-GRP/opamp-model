@@ -20,6 +20,7 @@ TOLERANCE_A0_DB = 0.1
 TOLERANCE_GBW_REL = 0.02
 TOLERANCE_PM_DEG = 2.0
 TOLERANCE_NOISE_REL = 0.02
+TOLERANCE_THD_DB = 1.0
 TOLERANCE_MODULE_REL = 0.02  # default 2% between python / ngspice / spectre
 
 SpreadKind = Literal["absolute", "relative", "none"]
@@ -80,6 +81,15 @@ COMPARE_METRICS: tuple[MetricSpec, ...] = (
         TOLERANCE_MODULE_REL,
     ),
     MetricSpec(
+        "thd_db",
+        "THD",
+        "large_signal",
+        "thd_db",
+        "dB",
+        "absolute",
+        TOLERANCE_THD_DB,
+    ),
+    MetricSpec(
         "zt_dc_ohm",
         "TIA Zt (DC)",
         "tia",
@@ -110,11 +120,11 @@ COMPARE_METRICS: tuple[MetricSpec, ...] = (
 
 # Skip peer tolerance when any engine uses a non-SPICE source for these metrics.
 METRIC_SKIP_IF_ANY_SOURCE: dict[str, frozenset[str]] = {
-    "slew_pos_vps": frozenset({"python_macromodel", "tran_scaffold"}),
-    "slew_neg_vps": frozenset({"python_macromodel", "tran_scaffold"}),
+    "slew_pos_vps": frozenset({"tran_scaffold"}),
+    "slew_neg_vps": frozenset({"tran_scaffold"}),
+    "thd_db": frozenset({"tran_scaffold"}),
     "psrr_db": frozenset({"python_macromodel", "psrr_macromodel", "hybrid_psrr"}),
-    "integrated_noise_rms_v": frozenset({"python_macromodel", "hybrid_noise_merge"}),
-    "zt_dc_ohm": frozenset({"python_macromodel"}),
+    "zt_dc_ohm": frozenset({"hybrid_tia_merge"}),
     "gm_s": frozenset({"python_macromodel"}),
 }
 
@@ -312,8 +322,10 @@ def _should_skip_parity(spec: MetricSpec, sources: dict[str, str]) -> bool:
     if len(unique) == 1 and unique.pop() in PARITY_SKIP_SOURCES:
         return True
     skip_any = METRIC_SKIP_IF_ANY_SOURCE.get(spec.key)
-    if skip_any is not None and any(src in skip_any for src in sources.values()):
-        return True
+    if skip_any is not None:
+        comparable = [src for src in sources.values() if src not in skip_any]
+        if len(comparable) < 2:
+            return True
     return False
 
 

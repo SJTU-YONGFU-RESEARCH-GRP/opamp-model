@@ -18,20 +18,27 @@ from opamp_model.cli_helpers import (
 from opamp_model.config import OpampConfig
 from opamp_model.io import write_slew_step_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
+from opamp_model.ngspice_engine import (
+    NgspiceNotFoundError,
+    simulate_slew_ngspice,
+)
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
     write_engine_report,
     write_slew_report,
 )
-from opamp_model.ngspice_engine import NgspiceNotFoundError, run_ngspice_tran_stub
 from opamp_model.simulation_log import SimulationLog, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, run_spectre_tran_stub
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_slew_spectre,
+)
+from opamp_model.noise_tran import transient_noise_rms
 from opamp_model.tran import (
     measure_slew_rates,
     plot_slew_step,
     plot_transient_noise_trace,
-    transient_noise_rms,
 )
 
 
@@ -122,32 +129,39 @@ def main() -> None:
     log_run_context(log)
 
     try:
-        if args.simulator == "ngspice":
-            run_ngspice_tran_stub(
+        if args.simulator == "python":
+            metrics, pos, neg = measure_slew_rates(
+                cfg,
+                noise,
+                step_v=args.step_v,
+                duration_s=args.duration_s,
+                dt_s=args.dt_s,
+            )
+        elif args.simulator == "ngspice":
+            metrics, pos, neg = simulate_slew_ngspice(
                 cfg,
                 out_dir,
-                template_name="slew_stub.cir",
-                log_name="ngspice_slew_stub.log",
+                step_v=args.step_v,
+                duration_s=args.duration_s,
+                dt_s=args.dt_s,
+                noise=noise if noise.enabled else None,
             )
         elif args.simulator == "spectre":
-            run_spectre_tran_stub(
+            metrics, pos, neg = simulate_slew_spectre(
                 cfg,
                 out_dir,
-                template_name="slew_stub.scs",
-                log_name="spectre_slew_stub.log",
+                step_v=args.step_v,
+                duration_s=args.duration_s,
+                dt_s=args.dt_s,
+                noise=noise if noise.enabled else None,
             )
+        else:
+            msg = f"Unsupported simulator for slew: {args.simulator}"
+            raise ValueError(msg)
     except (NgspiceNotFoundError, SpectreNotFoundError, SpectreLicenseError) as exc:
         log.write(str(exc))
         log.close()
         raise SystemExit(str(exc)) from exc
-
-    metrics, pos, neg = measure_slew_rates(
-        cfg,
-        noise,
-        step_v=args.step_v,
-        duration_s=args.duration_s,
-        dt_s=args.dt_s,
-    )
 
     csv_path = out_dir / "slew_step.csv"
     write_slew_step_csv(csv_path, pos["time_s"], pos["vout_v"], neg["vout_v"])

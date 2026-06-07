@@ -1,8 +1,8 @@
 * Open-loop output noise — ngspice .noise + AC (one-pole macromodel, same as ac_open_loop.cir).
 *
 * White input noise: thermal resistor Rn (en_white). Flicker is merged in the Python
-* engine (noise.flicker_voltage_density) because ngspice does not support flicker_noise()
-* in Verilog-A and .noise does not propagate noise through ideal VCVS (E) sources.
+* engine (``OpampNoiseConfig``) because ngspice ``.noise`` does not propagate thermal
+* noise through ideal VCVS (E) sources or Spectre ``laplace_nd`` filters.
 *
 * Run via: python scripts/run_noise.py --simulator ngspice --output-dir outputs/ngspice
 

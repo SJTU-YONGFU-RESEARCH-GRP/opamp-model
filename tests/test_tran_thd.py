@@ -5,11 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.noise_tran import transient_noise_rms
 from opamp_model.tran import (
     compute_thd,
     is_thd_ideal,
     simulate_sine_response,
-    transient_noise_rms,
 )
 
 

@@ -110,7 +110,7 @@ def test_veriloga_laplace_uses_array_variables_for_cm_ps() -> None:
     assert "real fz_numer[0:1]" in va
     assert "real cm_numer[0:1]" in va
     assert "real ps_numer[0:1]" in va
-    assert "laplace_nd(V(inp) - V(inn), numer, denom)" in va
+    assert "laplace_nd(V(inp) - V(inn) + V(n_noi), numer, denom)" in va
     assert "laplace_nd(0.5 * (V(inp) + V(inn)), cm_numer, cm_denom)" in va
     assert "laplace_nd(V(vdd), ps_numer, ps_denom)" in va
     assert "cm_numer[0] = numer[0] / cmrr_linear" in va

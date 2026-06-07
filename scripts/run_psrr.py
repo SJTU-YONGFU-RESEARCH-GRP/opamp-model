@@ -19,11 +19,6 @@ from opamp_model.cm_ps import plot_psrr, simulate_psrr
 from opamp_model.io import package_root, write_psrr_csv
 from opamp_model.metrics import build_metrics_report, format_metrics_table, write_metrics_json
 from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_psrr_ngspice
-from opamp_model.spectre_engine import (
-    SpectreLicenseError,
-    SpectreNotFoundError,
-    simulate_psrr_spectre,
-)
 from opamp_model.report import (
     preserve_metrics_sections,
     read_metrics_json,
@@ -31,6 +26,11 @@ from opamp_model.report import (
     write_psrr_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_psrr_spectre,
+)
 
 
 def main() -> None:

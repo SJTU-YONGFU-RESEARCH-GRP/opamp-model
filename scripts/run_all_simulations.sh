@@ -32,8 +32,8 @@ Usage: $(basename "$0") [OPTIONS] [-- EXTRA_ARGS...]
 Run all op-amp benches for each available engine under:
   \${OUTPUT_ROOT}/{python,ngspice,spectre}/
 
-TRAN benches (slew, THD) run for **python** only. ngspice/spectre TRAN stubs
-exist for manual runs but are omitted from batch to avoid false cross-engine parity.
+TRAN benches (slew, THD) run for all available engines using native
+``.tran`` netlists (ngspice ``wrdata`` / Spectre PSF).
 
 Options:
   --output-root DIR   Base output directory (default: ${ROOT_DIR}/outputs).
@@ -114,11 +114,9 @@ for engine in python ngspice spectre; do
             run_bench "${engine}" "${script}"
         fi
     done
-    if [[ "${engine}" == "python" ]]; then
-        for script in "${TRAN_SCRIPTS[@]}"; do
-            run_bench "${engine}" "${script}"
-        done
-    fi
+    for script in "${TRAN_SCRIPTS[@]}"; do
+        run_bench "${engine}" "${script}"
+    done
     write_report "${engine}"
 done
 

@@ -120,6 +120,24 @@ def read_ngspice_psrr_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
     }
 
 
+def read_ngspice_tran_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
+    """Read ngspice ``wrdata`` from a transient analysis (time, signal columns).
+
+    With ``wr_singlescale``, ngspice may duplicate the time column; the time axis
+    and signal samples are taken from the first and last columns respectively.
+    """
+    table = np.loadtxt(path)
+    if table.ndim == 1:
+        table = table.reshape(1, -1)
+    if table.shape[1] < 2:
+        msg = f"Expected >= 2 columns in TRAN wrdata, got {table.shape[1]}."
+        raise ValueError(msg)
+    return {
+        "time_s": table[:, 0].astype(np.float64),
+        "signal_v": table[:, -1].astype(np.float64),
+    }
+
+
 def read_ngspice_ac_wrdata(path: Path) -> dict[str, NDArray[np.float64]]:
     """Read ngspice ``wrdata`` from AC analysis (frequency, vdb, vp columns).
 

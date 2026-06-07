@@ -1,0 +1,21 @@
+// Open-loop THD — memoryless polynomial (Python tran.py parity).
+//
+// Run via: python scripts/run_thd.py --simulator spectre
+
+simulator lang=spectre
+
+parameters vcm=PLACEHOLDER_VCM
+parameters amp=PLACEHOLDER_AMP
+parameters freq_hz=PLACEHOLDER_FREQ
+parameters tstop=PLACEHOLDER_TSTOP
+parameters tstep=PLACEHOLDER_TSTEP
+
+VDD (vdd 0) vsource dc=1.8
+VSS (vss 0) vsource dc=0
+VCM (inn 0) vsource dc=vcm type=dc
+VSIN (inp 0) vsource type=sine dc=vcm ampl=amp freq=freq_hz
+Bout (out 0) bsource v=PLACEHOLDER_POLY_EXPR
+ROUT (out 0) resistor r=100
+
+save out
+tran tran stop=tstop step=tstep

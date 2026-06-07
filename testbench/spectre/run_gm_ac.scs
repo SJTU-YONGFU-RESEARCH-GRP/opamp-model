@@ -17,12 +17,14 @@ parameters dec=10
 VDD (vdd 0) vsource dc=1.8
 VSS (vss 0) vsource dc=0.0
 
-VIN (inp 0) vsource dc=0 type=sine ampl=0 freq=0 \
-    acmag=1 acphase=0
+VIN (inp 0) vsource dc=0 type=dc mag=1 phase=0
 VINN (inn 0) vsource dc=0 type=dc
 
 XGM (inp inn iout vdd vss) configurable_gm \
     GM_S=gm_s ROUT_OHM=rout_ohm COUT_F=cout_f
+
+ROUT (iout 0) resistor r=rout_ohm
+COUT (iout 0) capacitor c=cout_f
 
 save iout
 ac ac start=f_start stop=f_stop dec=dec annotate=status

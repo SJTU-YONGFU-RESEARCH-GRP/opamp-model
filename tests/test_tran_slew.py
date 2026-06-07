@@ -6,11 +6,11 @@ import numpy as np
 import pytest
 
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.noise_tran import transient_noise_rms
 from opamp_model.tran import (
     extract_slew_rate,
     measure_slew_rates,
     simulate_step_response,
-    transient_noise_rms,
 )
 
 

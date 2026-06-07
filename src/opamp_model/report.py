@@ -367,7 +367,7 @@ def write_slew_report(
         "",
         f"- **Engine:** {engine_label} (`{engine}`)",
         f"- **Generated:** {_utc_timestamp()}",
-        f"- **Extraction:** 10–90 % output swing (see `tran.extract_slew_rate`)",
+        "- **Extraction:** 10–90 % output swing (see `tran.extract_slew_rate`)",
         "",
     ]
     if scaffold:
@@ -453,7 +453,7 @@ def write_ac_comp_report(
         _config_table(cfg),
         "## Summary",
         "",
-        f"| Quantity | Value |",
+        "| Quantity | Value |",
         "| --- | --- |",
         f"| GBW | {gbw_hz:.6g} Hz |",
         f"| Peak excess | {peak_db:.4g} dB |",

@@ -22,6 +22,7 @@ from opamp_model.spectre_psf import (
     read_spectre_ac_psf,
 )
 
+
 def _spectre_available() -> bool:
     if shutil.which("spectre"):
         return True

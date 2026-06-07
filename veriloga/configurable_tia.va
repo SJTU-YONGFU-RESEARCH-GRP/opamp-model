@@ -2,6 +2,12 @@
 //
 // Small-signal matches Python tia.py: inverting summing node, AOL core,
 // feedback Rf||Cf from out to inn, input shunt Rin||(Cin+Cs).
+//
+// Spectre notes:
+// - The Spectre TIA bench (run_tia_ac.scs) uses a native VCVS+RC netlist for AC
+//   parity with ngspice; this VA documents the feedback topology for reference.
+// - laplace_nd coeffs must be refreshed each analog evaluation.
+// - Model Rout||Cout externally in the netlist; internal I(out) shunts break AC.
 
 `include "constants.vams"
 `include "disciplines.vams"
@@ -29,18 +35,16 @@ module configurable_tia(iin, inp, inn, out, vdd, vss);
     real denom_op[0:1];
 
     analog begin
-        @(initial_step) begin
-            a0_linear = pow(10.0, A0_DB / 20.0);
-            if (a0_linear < 1.0)
-                a0_linear = 1.0;
-            wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
-            numer[0] = a0_linear * wp;
-            numer[1] = 0.0;
-            denom_op[0] = wp;
-            denom_op[1] = 1.0;
-        end
+        a0_linear = pow(10.0, A0_DB / 20.0);
+        if (a0_linear < 1.0)
+            a0_linear = 1.0;
+        wp = 2.0 * `M_PI * GBW_HZ / a0_linear;
+        numer[0] = a0_linear * wp;
+        numer[1] = 0.0;
+        denom_op[0] = wp;
+        denom_op[1] = 1.0;
 
-        I(inn) <+ I(iin);
+        // External netlist injects AC current at ``iin`` and ties ``inn`` via RINJ (ngspice parity).
         if (RF_OHM > 0.0)
             I(inn, out) <+ V(inn, out) / RF_OHM;
         if (CF_F > 0.0)
@@ -52,11 +56,6 @@ module configurable_tia(iin, inp, inn, out, vdd, vss);
             I(inn) <+ (CIN_F + CS_F) * ddt(V(inn));
 
         V(out) <+ laplace_nd(V(inp) - V(inn), numer, denom_op);
-
-        if (ROUT_OHM > 0.0)
-            I(out) <+ V(out) / ROUT_OHM;
-        if (COUT_F > 0.0)
-            I(out) <+ COUT_F * ddt(V(out));
     end
 
 endmodule

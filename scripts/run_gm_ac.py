@@ -27,7 +27,11 @@ from opamp_model.metrics import build_metrics_report, write_metrics_json
 from opamp_model.ngspice_engine import NgspiceNotFoundError, simulate_gm_ac_ngspice
 from opamp_model.report import preserve_metrics_sections, read_metrics_json
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_gm_ac_spectre
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_gm_ac_spectre,
+)
 
 
 def add_gm_args(parser: argparse.ArgumentParser) -> None:

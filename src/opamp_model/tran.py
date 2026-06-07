@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from opamp_model.config import OpampConfig, OpampNoiseConfig
-from opamp_model.noise_tran import input_referred_transient_noise, transient_noise_rms
+from opamp_model.noise_tran import input_referred_transient_noise
 from opamp_model.plot_style import (
     FIGSIZE,
     LINE_COLORS,
@@ -125,6 +125,74 @@ def simulate_step_response(
         cfg.vswing_high_v,
     )
     return TranStepResult(
+        time_s=time_s,
+        vout_v=vout,
+        vout_clean_v=vout_clean,
+        noise_v=noise_samples,
+    )
+
+
+def overlay_transient_noise_on_step(
+    result: TranStepResult,
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig | None,
+) -> TranStepResult:
+    """Add input-referred noise to a unity-gain step waveform from a SPICE engine.
+
+    The clean SPICE output is preserved in ``vout_clean_v``; ``vout_v`` includes
+    noise overlaid at the output (1:1 for a follower), matching ``simulate_step_response``.
+    """
+    if noise is None or not noise.enabled:
+        return result
+    time_s = result["time_s"]
+    noise_samples = input_referred_transient_noise(time_s, noise)
+    vout_clean = result["vout_clean_v"]
+    vout = np.clip(
+        vout_clean + noise_samples,
+        cfg.vswing_low_v,
+        cfg.vswing_high_v,
+    )
+    return TranStepResult(
+        time_s=time_s,
+        vout_v=vout,
+        vout_clean_v=vout_clean,
+        noise_v=noise_samples,
+    )
+
+
+def overlay_transient_noise_on_sine(
+    result: TranSineResult,
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig | None,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+) -> TranSineResult:
+    """Add input-referred noise to an open-loop THD waveform from a SPICE engine.
+
+    Applies the same memoryless nonlinearity delta as ``simulate_sine_response`` so
+    overlay distortion matches the Python macromodel while leaving ``vout_clean_v``
+    as the engine's deterministic waveform.
+    """
+    if noise is None or not noise.enabled:
+        return result
+    time_s = result["time_s"]
+    noise_samples = input_referred_transient_noise(time_s, noise)
+    vin_clean = amplitude_v * np.sin(2.0 * np.pi * freq_hz * time_s)
+    vout_clean = result["vout_clean_v"]
+    delta = _apply_memoryless_nonlinearity(
+        vin_clean + noise_samples,
+        a1=cfg.a0_linear,
+        a2=cfg.nl_a2,
+        a3=cfg.nl_a3,
+    ) - _apply_memoryless_nonlinearity(
+        vin_clean,
+        a1=cfg.a0_linear,
+        a2=cfg.nl_a2,
+        a3=cfg.nl_a3,
+    )
+    vout = (vout_clean + delta).astype(np.float64)
+    return TranSineResult(
         time_s=time_s,
         vout_v=vout,
         vout_clean_v=vout_clean,

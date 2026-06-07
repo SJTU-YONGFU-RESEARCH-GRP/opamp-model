@@ -59,4 +59,4 @@ def test_render_cm_netlist_acm_gain() -> None:
     acm_gain = max(cfg.a0_linear, 1.0) / max(cfg.cmrr_linear, 1.0)
     assert f".param acm_gain={acm_gain}" in text or f".param acm_gain={acm_gain:.12g}" in text
     assert "Eaux n1 0 inp 0 {acm_gain}" in text
-    assert "Elink inp inn inn 0 1" in text
+    assert "Elink inp 0 inn 0 1" in text

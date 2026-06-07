@@ -1,19 +1,28 @@
-// TIA closed-loop AC stub (current input).
-// Validates Spectre + configurable_tia; Zt curves from Python macromodel today.
+// TIA closed-loop AC — Spectre one-pole macromodel + Rf||Cf (ngspice parity).
+//
+// Spectre isource does not accept SPICE-style ``ac=``; use a Norton pair
+// (VINJ + RINJ = 1 Ω) with ``mag = 1 + Rf/A0`` so the effective AC current
+// into the summing node is 1 A (Z_in ≈ Rf/A0 at low frequency).
+//
+// Run via:
+//   python scripts/run_tia_ac.py --simulator spectre --output-dir outputs/spectre
 
 simulator lang=spectre
-
-ahdl_include "./veriloga/configurable_tia.va"
 
 parameters rf_ohm=100k
 parameters cf_f=100f
 parameters cs_f=0
 parameters a0_db=80
 parameters gbw_hz=10Meg
+parameters a0_linear=PLACEHOLDER_A0
+parameters rlp_ohm=PLACEHOLDER_RLP
+parameters clp_f=PLACEHOLDER_CLP
 parameters rin_ohm=1T
 parameters cin_f=1p
+parameters cshunt_f=1p
 parameters rout_ohm=100
 parameters cout_f=2p
+parameters iinj_mag=PLACEHOLDER_IINJ
 parameters f_start=1
 parameters f_stop=100Meg
 parameters dec=10
@@ -22,13 +31,22 @@ VDD (vdd 0) vsource dc=1.8
 VSS (vss 0) vsource dc=0.0
 VCM (inp 0) vsource dc=0.9 type=dc
 
-IIN (iin 0) isource dc=0 type=sine ampl=1u freq=0 \
-    acmag=1 acphase=0
+VINJ (iin 0) vsource dc=0 type=dc mag=iinj_mag phase=0
+RINJ (inn iin) resistor r=1
 
-XTIA (iin inp inn out vdd vss) configurable_tia \
-    RF_OHM=rf_ohm CF_F=cf_f CS_F=cs_f \
-    A0_DB=a0_db GBW_HZ=gbw_hz RIN_OHM=rin_ohm CIN_F=cin_f \
-    ROUT_OHM=rout_ohm COUT_F=cout_f
+RINN (inn 0) resistor r=rin_ohm
+CINN (inn 0) capacitor c=cshunt_f
+
+RF (out inn) resistor r=rf_ohm
+CF (out inn) capacitor c=cf_f
+
+EAUX (n1 0 inp inn) vcvs gain=a0_linear
+RLP (n1 n2) resistor r=rlp_ohm
+CLP (n2 0) capacitor c=clp_f
+EBUF (out 0 n2 0) vcvs gain=1
+
+ROUT (out 0) resistor r=rout_ohm
+COUT (out 0) capacitor c=cout_f
 
 save out
 ac ac start=f_start stop=f_stop dec=dec annotate=status

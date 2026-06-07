@@ -67,4 +67,4 @@ def test_metric_sources_per_engine() -> None:
     assert python["ac"]["gbw_hz"]["source"] == "python_macromodel"
     assert ngspice["ac"]["gbw_hz"]["source"] == "ngspice_wrdata"
     assert python["large_signal"]["slew_pos_vps"]["source"] == "python_macromodel"
-    assert ngspice["large_signal"]["slew_pos_vps"]["source"] == "tran_scaffold"
+    assert ngspice["large_signal"]["slew_pos_vps"]["source"] == "ngspice_tran_wrdata"

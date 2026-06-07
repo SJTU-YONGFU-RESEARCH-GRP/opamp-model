@@ -35,5 +35,5 @@ def test_veriloga_laplace_uses_array_variables() -> None:
     """Spectre requires laplace_nd coeffs in array variables, not inline expressions."""
     va = (package_root() / "veriloga/configurable_opamp.va").read_text(encoding="utf-8")
     assert "real numer[0:1]" in va
-    assert "laplace_nd(V(inp) - V(inn), numer, denom)" in va
+    assert "laplace_nd(V(inp) - V(inn) + V(n_noi), numer, denom)" in va
     assert "{a0_linear * wp" not in va

@@ -1,7 +1,7 @@
 # Optional reference targets (populate from transistor-level sim or lab data).
 # NOT an engine truth file — scripts/compare_engines.py prints these as a "ref" column only.
 # Pass/fail is peer spread (python / ngspice / spectre) vs compare limits:
-#   A0 ≤ 0.1 dB, GBW ≤ 2%, phase margin ≤ 2°, integrated noise RMS ≤ 2%, slew ≤ 2%.
+#   A0 ≤ 0.1 dB, GBW ≤ 2%, phase margin ≤ 2°, integrated noise RMS ≤ 2%, slew ≤ 2%, THD ≤ 1 dB.
 # Keys map to opamp_metrics.json fields (slew_v_per_us → slew_pos/neg_vps in V/s).
 #
 # Flicker noise (Phase 1): en_flicker_1hz is true density at 1 Hz (paper pwr / Spectre

@@ -31,7 +31,11 @@ from opamp_model.report import (
     write_noise_report,
 )
 from opamp_model.simulation_log import SimulationLog, archive_veriloga_artifacts, log_run_context
-from opamp_model.spectre_engine import SpectreLicenseError, SpectreNotFoundError, simulate_noise_spectre
+from opamp_model.spectre_engine import (
+    SpectreLicenseError,
+    SpectreNotFoundError,
+    simulate_noise_spectre,
+)
 
 
 def main() -> None:

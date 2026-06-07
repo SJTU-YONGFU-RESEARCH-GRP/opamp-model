@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from opamp_model.cm_ps import simulate_psrr
 from opamp_model.compare import (
     TOLERANCE_A0_DB,
     TOLERANCE_GBW_REL,
     TOLERANCE_MODULE_REL,
     TOLERANCE_NOISE_REL,
     TOLERANCE_PM_DEG,
+    TOLERANCE_THD_DB,
     compare_engines,
     compute_spread,
     format_compare_markdown,
@@ -20,7 +22,6 @@ from opamp_model.compare import (
     load_engine_metrics,
     write_compare_report,
 )
-from opamp_model.cm_ps import simulate_psrr
 from opamp_model.config import OpampConfig, OpampNoiseConfig
 from opamp_model.io import package_root
 from opamp_model.metrics import build_metrics_report
@@ -132,8 +133,8 @@ def test_compare_fails_pm_spread(tmp_path: Path) -> None:
     assert any("Phase margin" in f for f in result.failures)
 
 
-def test_compare_skips_noise_spread_check(tmp_path: Path) -> None:
-    """Integrated noise parity is n/a when hybrid/python sources are present."""
+def test_compare_fails_noise_spread(tmp_path: Path) -> None:
+    """Integrated noise spread above tolerance fails peer parity."""
     base = 0.01
     high = base * (1.0 + TOLERANCE_NOISE_REL + 0.02)
     _write_metrics(tmp_path / "python" / "opamp_metrics.json", _minimal_report(engine="python"))
@@ -144,8 +145,9 @@ def test_compare_skips_noise_spread_check(tmp_path: Path) -> None:
     _write_metrics(tmp_path / "spectre" / "opamp_metrics.json", _minimal_report(engine="spectre"))
     result = compare_engines(tmp_path)
     noise_row = next(r for r in result.rows if r.spec.key == "integrated_noise_rms_v")
-    assert noise_row.parity_skipped
-    assert result.passed
+    assert not noise_row.parity_skipped
+    assert noise_row.within_tolerance is False
+    assert not result.passed
 
 
 def test_golden_column_optional(tmp_path: Path) -> None:
@@ -181,8 +183,8 @@ def test_compare_table_includes_limit_column(tmp_path: Path) -> None:
     assert f"{TOLERANCE_A0_DB:g} dB" in text
 
 
-def test_compare_skips_slew_parity_when_python_tran(tmp_path: Path) -> None:
-    """Slew spread is n/a when engines share python-only / TRAN-scaffold sources."""
+def test_compare_checks_slew_parity(tmp_path: Path) -> None:
+    """Slew spread is checked when engines report native TRAN metrics."""
     for engine in ("python", "ngspice", "spectre"):
         _write_metrics(
             tmp_path / engine / "opamp_metrics.json",
@@ -191,10 +193,20 @@ def test_compare_skips_slew_parity_when_python_tran(tmp_path: Path) -> None:
     result = compare_engines(tmp_path)
     slew_rows = [r for r in result.rows if r.spec.key in ("slew_pos_vps", "slew_neg_vps")]
     assert slew_rows
+    assert all(not r.parity_skipped for r in slew_rows)
+    assert all(r.within_tolerance for r in slew_rows)
+
+
+def test_compare_skips_slew_when_tran_scaffold(tmp_path: Path) -> None:
+    """Legacy TRAN-scaffold sources skip slew peer parity."""
+    for engine in ("python", "ngspice", "spectre"):
+        report = _minimal_report(engine=engine)
+        report["large_signal"]["slew_pos_vps"]["source"] = "tran_scaffold"
+        report["large_signal"]["slew_neg_vps"]["source"] = "tran_scaffold"
+        _write_metrics(tmp_path / engine / "opamp_metrics.json", report)
+    result = compare_engines(tmp_path)
+    slew_rows = [r for r in result.rows if r.spec.key in ("slew_pos_vps", "slew_neg_vps")]
     assert all(r.parity_skipped for r in slew_rows)
-    text = format_compare_table(result)
-    assert "n/a" in text
-    assert "Parity skipped" in text
 
 
 def test_compare_skips_psrr_parity(tmp_path: Path) -> None:
@@ -210,8 +222,8 @@ def test_compare_skips_psrr_parity(tmp_path: Path) -> None:
     assert psrr_row.within_tolerance is None
 
 
-def test_compare_skips_noise_when_hybrid_or_python(tmp_path: Path) -> None:
-    """Integrated noise parity is n/a when any engine uses hybrid/python sources."""
+def test_compare_checks_noise_when_engines_agree(tmp_path: Path) -> None:
+    """Integrated noise parity is checked across python/ngspice/spectre."""
     for engine in ("python", "ngspice", "spectre"):
         _write_metrics(
             tmp_path / engine / "opamp_metrics.json",
@@ -219,7 +231,57 @@ def test_compare_skips_noise_when_hybrid_or_python(tmp_path: Path) -> None:
         )
     result = compare_engines(tmp_path)
     noise_row = next(r for r in result.rows if r.spec.key == "integrated_noise_rms_v")
-    assert noise_row.parity_skipped
+    assert not noise_row.parity_skipped
+    assert noise_row.within_tolerance
+
+
+def test_compare_skips_thd_when_ideal(tmp_path: Path) -> None:
+    """THD parity is n/a when all engines report ideal (null) THD."""
+    for engine in ("python", "ngspice", "spectre"):
+        _write_metrics(
+            tmp_path / engine / "opamp_metrics.json",
+            _minimal_report(engine=engine),
+        )
+    result = compare_engines(tmp_path)
+    thd_row = next(r for r in result.rows if r.spec.key == "thd_db")
+    assert thd_row.parity_skipped
+
+
+def test_compare_checks_thd_parity(tmp_path: Path) -> None:
+    """THD spread is checked when engines report finite distortion."""
+    thd_db = -42.5
+    for engine in ("python", "ngspice", "spectre"):
+        report = _minimal_report(engine=engine)
+        report["large_signal"]["thd_db"]["value"] = thd_db
+        report["large_signal"]["thd_db"]["status"] = "reported"
+        report["large_signal"]["thd_db"]["source"] = (
+            "python_macromodel"
+            if engine == "python"
+            else f"{engine}_tran_wrdata"
+            if engine == "ngspice"
+            else "spectre_tran_psf"
+        )
+        _write_metrics(tmp_path / engine / "opamp_metrics.json", report)
+    result = compare_engines(tmp_path)
+    thd_row = next(r for r in result.rows if r.spec.key == "thd_db")
+    assert not thd_row.parity_skipped
+    assert thd_row.within_tolerance
+
+
+def test_compare_fails_thd_spread(tmp_path: Path) -> None:
+    """THD spread above 1 dB fails peer parity."""
+    for engine, value in (("python", -40.0), ("ngspice", -40.0), ("spectre", -42.5)):
+        report = _minimal_report(engine=engine)
+        report["large_signal"]["thd_db"]["value"] = value
+        report["large_signal"]["thd_db"]["status"] = "reported"
+        report["large_signal"]["thd_db"]["source"] = "ngspice_tran_wrdata"
+        _write_metrics(tmp_path / engine / "opamp_metrics.json", report)
+    result = compare_engines(tmp_path)
+    thd_row = next(r for r in result.rows if r.spec.key == "thd_db")
+    assert not thd_row.parity_skipped
+    assert thd_row.within_tolerance is False
+    assert not result.passed
+    assert TOLERANCE_THD_DB == 1.0
 
 
 def test_write_compare_report_markdown(tmp_path: Path) -> None:

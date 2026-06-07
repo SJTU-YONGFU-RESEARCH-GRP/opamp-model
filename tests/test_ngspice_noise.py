@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from opamp_model.config import OpampConfig, OpampNoiseConfig
+from opamp_model.io import package_root
 from opamp_model.model import simulate_noise
 from opamp_model.ngspice_engine import (
     NgspiceNotFoundError,
     render_ngspice_noise_netlist,
     simulate_noise_ngspice,
 )
-from opamp_model.io import package_root
 
 pytestmark = pytest.mark.skipif(
     __import__("shutil").which("ngspice") is None
@@ -34,7 +34,8 @@ def test_render_noise_netlist_has_noise_and_ac() -> None:
     assert ".noise V(out)" in text
     assert ".ac dec" in text
     assert "Rn inp inn" in text
-    assert "flicker_voltage_density" in text or "flicker_noise()" in text
+    assert "Eaux n1 0 inp inn" in text
+    assert "OpampNoiseConfig" in text or "flicker" in text.lower()
     assert "wrdata noise_spectrum.raw" in text
 
 

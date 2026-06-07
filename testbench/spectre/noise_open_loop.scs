@@ -1,7 +1,7 @@
 // Open-loop output noise (Cadence Spectre).
 //
-// White + flicker noise are modeled in configurable_opamp.va (ENABLE_NOISE=1).
-// RN is a high-Z fallback when VA white noise is disabled; engine sets rn_white_ohm.
+// White + flicker noise: VA ``n_noi`` branch summed into ``laplace_nd`` input; engine
+// merges native PSF with config flicker when native white is within 0.5–2× of AC merge.
 //
 // Run via:
 //   python scripts/run_noise.py --simulator spectre --output-dir outputs/spectre

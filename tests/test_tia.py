@@ -101,16 +101,18 @@ def test_render_ngspice_tia_netlist_substitutes_params() -> None:
     assert "wrdata tia_zt.raw" in text
 
 
-def test_render_spectre_tia_netlist_absolutizes_va() -> None:
-    """Rendered Spectre TIA netlist uses an absolute configurable_tia.va path."""
+def test_render_spectre_tia_netlist_substitutes_params() -> None:
+    """Rendered Spectre TIA netlist carries macromodel and Norton injection scale."""
     repo = package_root()
     template = repo / "testbench" / "spectre" / "run_tia_ac.scs"
-    cfg = OpampConfig()
-    tia = TiaConfig()
+    cfg = OpampConfig(a0_db=80.0, gbw_hz=10.0e6)
+    tia = TiaConfig(rf_ohm=100.0e3)
     text = render_spectre_tia_netlist(template, cfg, tia, repo_root=repo)
-    va = (repo / "veriloga/configurable_tia.va").resolve()
-    assert f'ahdl_include "{va}"' in text
-    assert "configurable_tia" in text
+    a0 = max(cfg.a0_linear, 1.0)
+    iinj_mag = 1.0 + tia.rf_ohm / a0
+    assert "EAUX (n1 0 inp inn) vcvs" in text
+    assert f"parameters iinj_mag={iinj_mag}" in text or f"parameters iinj_mag={iinj_mag:.12g}" in text
+    assert "VINJ (iin 0) vsource" in text
 
 
 @pytest.mark.skipif(not _NGSPICE_AVAILABLE, reason="ngspice not on PATH")

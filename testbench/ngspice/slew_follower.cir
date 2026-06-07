@@ -1,0 +1,31 @@
+* Unity-gain follower slew — ngspice behavioral macromodel (Python tran.py parity).
+*
+*   dVout/dt = clip(2*pi*GBW*(Vin - Vout), slew_neg, slew_pos)
+* Realized with a limited current source into a 1 F integrating capacitor.
+*
+* Run via: python scripts/run_slew.py --simulator ngspice
+
+.param vcm=PLACEHOLDER_VCM
+.param step_v=PLACEHOLDER_STEP
+.param gbw_hz=PLACEHOLDER_GBW
+.param slew_pos=PLACEHOLDER_SLEW_POS
+.param slew_neg=PLACEHOLDER_SLEW_NEG
+.param vsw_high=PLACEHOLDER_VSW_HIGH
+.param vsw_low=PLACEHOLDER_VSW_LOW
+.param tstop=PLACEHOLDER_TSTOP
+.param tstep=PLACEHOLDER_TSTEP
+.param gm=PLACEHOLDER_GM
+
+VIN vin 0 PULSE({vcm} {vcm+step_v} 0 1p 1p {tstop} {tstop})
+Bs 0 n I = { min(max( {gm}*(V(vin)-V(n)), {slew_neg}), {slew_pos}) }
+Cn n 0 1 IC={vcm}
+Eout out 0 n 0 1
+Rout out 0 100
+
+.tran {tstep} {tstop} uic
+.control
+run
+wrdata PLACEHOLDER_WRDATA time v(out)
+.endc
+
+.end

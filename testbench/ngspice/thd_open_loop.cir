@@ -1,0 +1,29 @@
+* Open-loop THD — memoryless polynomial (Python tran.py parity).
+*
+*   Vout = a0*vd + a2*vd^2 + a3*vd^3,  vd = V(inp) - V(inn)
+*
+* Run via: python scripts/run_thd.py --simulator ngspice
+
+.param vcm=PLACEHOLDER_VCM
+.param amp=PLACEHOLDER_AMP
+.param freq=PLACEHOLDER_FREQ
+.param a0=PLACEHOLDER_A0
+.param a2=PLACEHOLDER_A2
+.param a3=PLACEHOLDER_A3
+.param tstop=PLACEHOLDER_TSTOP
+.param tstep=PLACEHOLDER_TSTEP
+
+VDD vdd 0 DC 1.8
+VSS vss 0 DC 0
+VCM inn 0 DC {vcm}
+VSIN inp 0 SIN({vcm} {amp} {freq} 0 0 0)
+Bout out 0 V = { {a0}*(V(inp)-V(inn)) + {a2}*pow(V(inp)-V(inn),2) + {a3}*pow(V(inp)-V(inn),3) }
+ROUT out 0 100
+
+.tran {tstep} {tstop}
+.control
+run
+wrdata PLACEHOLDER_WRDATA time v(out)
+.endc
+
+.end

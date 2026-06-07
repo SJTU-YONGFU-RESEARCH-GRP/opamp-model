@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
 from dataclasses import dataclass
@@ -11,24 +12,35 @@ import numpy as np
 from numpy.typing import NDArray
 
 from opamp_model.ac import cmrr_from_aol_and_acm, extract_gbw_phase_margin
-from opamp_model.cm_ps import PsrrSimulationResult, psrr_db_from_transfer
+from opamp_model.cm_ps import CmrrSimulationResult, PsrrSimulationResult, psrr_db_from_transfer
 from opamp_model.config import BenchSweepConfig, GmConfig, OpampConfig, OpampNoiseConfig, TiaConfig
 from opamp_model.core import dominant_pole_rad_s
+from opamp_model.gm import GmAcSimulationResult, bode_to_gm_result
 from opamp_model.io import (
     log_frequency_sweep,
     package_root,
     read_ngspice_ac_wrdata,
     read_ngspice_noise_wrdata,
     read_ngspice_psrr_wrdata,
+    read_ngspice_tran_wrdata,
     write_bode_csv,
     write_psrr_csv,
 )
-from opamp_model.cm_ps import CmrrSimulationResult
-from opamp_model.gm import GmAcSimulationResult, bode_to_gm_result
+from opamp_model.tran import (
+    SlewMetrics,
+    ThdMetrics,
+    TranStepResult,
+    TranSineResult,
+    compute_thd,
+    extract_slew_rate,
+    is_thd_ideal,
+    overlay_transient_noise_on_sine,
+    overlay_transient_noise_on_step,
+)
 from opamp_model.model import AcSimulationResult, NoiseSimulationResult
-from opamp_model.tia import TiaSimulationResult, bode_to_tia_result
 from opamp_model.noise import flicker_voltage_density
 from opamp_model.noise_analysis import extract_noise_metrics
+from opamp_model.tia import TiaSimulationResult, bode_to_tia_result
 
 
 class NgspiceNotFoundError(RuntimeError):
@@ -563,6 +575,7 @@ def ngspice_output_noise_spectrum(
     the same netlist. Input-referred density follows ``OpampNoiseConfig`` (white +
     flicker), matching the Python macromodel in ``noise.py``.
     """
+    _ = cfg
     if not noise.enabled:
         return np.zeros_like(frequency_hz, dtype=np.float64)
     a_mag = _interp_gain_linear(frequency_hz, ac_frequency_hz, gain_db)
@@ -570,6 +583,45 @@ def ngspice_output_noise_spectrum(
     flicker = flicker_voltage_density(frequency_hz, noise)
     en_in = np.sqrt(white**2 + flicker**2)
     return (en_in * a_mag).astype(np.float64)
+
+
+def merge_engine_noise_spectrum(
+    cfg: OpampConfig,
+    noise: OpampNoiseConfig,
+    *,
+    frequency_hz: NDArray[np.float64],
+    gain_db: NDArray[np.float64],
+    ac_frequency_hz: NDArray[np.float64],
+    native_onoise: NDArray[np.float64] | None = None,
+    native_frequency_hz: NDArray[np.float64] | None = None,
+) -> tuple[NDArray[np.float64], str]:
+    """Merge native ``.noise`` output spectrum with AC-gain × ``OpampNoiseConfig``.
+
+    When native output noise from SPICE is negligible (ideal VCVS / ``laplace_nd``
+    benches), fall back to the AC-gain merge that matches the Python macromodel.
+    """
+    ac_merge = ngspice_output_noise_spectrum(
+        cfg,
+        noise,
+        frequency_hz=frequency_hz,
+        gain_db=gain_db,
+        ac_frequency_hz=ac_frequency_hz,
+    )
+    if native_onoise is None or native_frequency_hz is None or not noise.enabled:
+        return ac_merge, "ac_noise_merge"
+    log_f = np.log10(np.maximum(frequency_hz.astype(np.float64), 1.0e-30))
+    log_native = np.log10(np.maximum(native_frequency_hz.astype(np.float64), 1.0e-30))
+    native_interp = np.interp(log_f, log_native, native_onoise.astype(np.float64))
+    native_peak = float(np.nanmax(native_interp))
+    ac_peak = float(np.nanmax(ac_merge))
+    ratio = native_peak / max(ac_peak, 1.0e-30)
+    if 0.5 <= ratio <= 2.0:
+        flicker = flicker_voltage_density(frequency_hz, noise)
+        a_mag = _interp_gain_linear(frequency_hz, ac_frequency_hz, gain_db)
+        flicker_out = flicker * a_mag
+        merged = np.sqrt(native_interp**2 + flicker_out**2).astype(np.float64)
+        return merged, "native_noise_merge"
+    return ac_merge, "ac_noise_merge"
 
 
 def run_ngspice_noise(
@@ -627,21 +679,23 @@ def simulate_noise_ngspice(
     output_dir: Path,
     noise: OpampNoiseConfig,
 ) -> NoiseSimulationResult:
-    """Run ngspice noise bench; spectrum from AC gain × input-referred noise model."""
+    """Run ngspice noise bench; merge native ``.noise`` with AC-gain spectrum."""
     artifacts = run_ngspice_noise(cfg, noise, output_dir)
-    _ = read_ngspice_noise_wrdata(artifacts.noise_wrdata_path)
+    native = read_ngspice_noise_wrdata(artifacts.noise_wrdata_path)
     ac = read_ngspice_ac_wrdata(artifacts.ac_wrdata_path)
     frequency_hz = log_frequency_sweep(
         cfg.sweep.f_start_hz,
         cfg.sweep.f_stop_hz,
         cfg.sweep.points_per_decade,
     )
-    spectrum = ngspice_output_noise_spectrum(
+    spectrum, _ = merge_engine_noise_spectrum(
         cfg,
         noise,
         frequency_hz=frequency_hz,
         gain_db=ac["gain_db"],
         ac_frequency_hz=ac["frequency_hz"],
+        native_onoise=native["onoise_v_per_sqrt_hz"],
+        native_frequency_hz=native["frequency_hz"],
     )
     metrics = extract_noise_metrics(cfg, noise, frequency_hz, spectrum)
     return NoiseSimulationResult(
@@ -840,6 +894,259 @@ def simulate_gm_ac_ngspice(
         bode["gain_db"],
         bode["phase_deg"],
     )
+
+
+def render_ngspice_slew_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    *,
+    step_v: float,
+    duration_s: float,
+    dt_s: float,
+    wrdata_name: str,
+) -> str:
+    """Render ngspice unity-gain follower slew transient netlist."""
+    gm = 2.0 * math.pi * cfg.gbw_hz
+    slew_pos = abs(cfg.slew_pos_vps)
+    slew_neg = cfg.slew_neg_vps if cfg.slew_neg_vps < 0.0 else -abs(cfg.slew_neg_vps)
+    return (
+        template_path.read_text(encoding="utf-8")
+        .replace("PLACEHOLDER_VCM", _spectre_value(cfg.vcm_v))
+        .replace("PLACEHOLDER_STEP", _spectre_value(step_v))
+        .replace("PLACEHOLDER_GBW", _spectre_value(cfg.gbw_hz))
+        .replace("PLACEHOLDER_SLEW_POS", _spectre_value(slew_pos))
+        .replace("PLACEHOLDER_SLEW_NEG", _spectre_value(slew_neg))
+        .replace("PLACEHOLDER_VSW_HIGH", _spectre_value(cfg.vswing_high_v))
+        .replace("PLACEHOLDER_VSW_LOW", _spectre_value(cfg.vswing_low_v))
+        .replace("PLACEHOLDER_TSTOP", _spectre_value(duration_s))
+        .replace("PLACEHOLDER_TSTEP", _spectre_value(dt_s))
+        .replace("PLACEHOLDER_GM", _spectre_value(gm))
+        .replace("PLACEHOLDER_WRDATA", wrdata_name)
+    )
+
+
+def run_ngspice_slew_step(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    step_v: float,
+    duration_s: float,
+    dt_s: float,
+    wrdata_name: str,
+    template_name: str = "slew_follower.cir",
+) -> Path:
+    """Run one ngspice slew step transient and export ``wrdata``."""
+    repo = package_root()
+    template = repo / "testbench" / "ngspice" / template_name
+    ng_dir = output_dir / "ngspice"
+    logs_dir = output_dir / "logs"
+    ng_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = ng_dir / f"{wrdata_name.replace('.raw', '')}.cir"
+    netlist_path.write_text(
+        render_ngspice_slew_netlist(
+            template,
+            cfg,
+            step_v=step_v,
+            duration_s=duration_s,
+            dt_s=dt_s,
+            wrdata_name=wrdata_name,
+        ),
+        encoding="utf-8",
+    )
+    wrdata_path = ng_dir / wrdata_name
+    log_path = logs_dir / f"ngspice_{wrdata_name.replace('.raw', '')}.log"
+    executable = find_ngspice_executable()
+    completed = subprocess.run(
+        [executable, "-b", netlist_path.name],
+        cwd=ng_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    if completed.returncode != 0:
+        msg = f"ngspice slew TRAN failed with code {completed.returncode}; see {log_path}"
+        raise RuntimeError(msg)
+    if not wrdata_path.is_file():
+        msg = f"ngspice did not produce {wrdata_path}"
+        raise RuntimeError(msg)
+    return wrdata_path
+
+
+def _tran_step_from_wrdata(wrdata_path: Path) -> TranStepResult:
+    """Build a ``TranStepResult`` from ngspice slew ``wrdata``."""
+    data = read_ngspice_tran_wrdata(wrdata_path)
+    vout = data["signal_v"]
+    zeros = np.zeros_like(vout, dtype=np.float64)
+    return TranStepResult(
+        time_s=data["time_s"],
+        vout_v=vout,
+        vout_clean_v=vout,
+        noise_v=zeros,
+    )
+
+
+def simulate_slew_ngspice(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    step_v: float = 0.8,
+    duration_s: float = 2.0e-6,
+    dt_s: float = 1.0e-9,
+    noise: OpampNoiseConfig | None = None,
+) -> tuple[SlewMetrics, TranStepResult, TranStepResult]:
+    """Run positive/negative slew steps in ngspice and extract slew rates."""
+    pos_path = run_ngspice_slew_step(
+        cfg,
+        output_dir,
+        step_v=step_v,
+        duration_s=duration_s,
+        dt_s=dt_s,
+        wrdata_name="slew_pos.raw",
+    )
+    neg_path = run_ngspice_slew_step(
+        cfg,
+        output_dir,
+        step_v=-step_v,
+        duration_s=duration_s,
+        dt_s=dt_s,
+        wrdata_name="slew_neg.raw",
+    )
+    pos = overlay_transient_noise_on_step(_tran_step_from_wrdata(pos_path), cfg, noise)
+    neg = overlay_transient_noise_on_step(_tran_step_from_wrdata(neg_path), cfg, noise)
+    vfinal_pos = float(
+        np.clip(cfg.vcm_v + step_v, cfg.vswing_low_v, cfg.vswing_high_v)
+    )
+    vfinal_neg = float(
+        np.clip(cfg.vcm_v - step_v, cfg.vswing_low_v, cfg.vswing_high_v)
+    )
+    sr_pos, _ = extract_slew_rate(pos["time_s"], pos["vout_clean_v"], vfinal_pos)
+    _, sr_neg = extract_slew_rate(neg["time_s"], neg["vout_clean_v"], vfinal_neg)
+    metrics = SlewMetrics(
+        slew_pos_vps=float(sr_pos),
+        slew_neg_vps=float(sr_neg),
+    )
+    return metrics, pos, neg
+
+
+def render_ngspice_thd_netlist(
+    template_path: Path,
+    cfg: OpampConfig,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    wrdata_name: str,
+) -> str:
+    """Render ngspice open-loop THD transient netlist."""
+    duration_s = cycles / freq_hz
+    return (
+        template_path.read_text(encoding="utf-8")
+        .replace("PLACEHOLDER_VCM", _spectre_value(cfg.vcm_v))
+        .replace("PLACEHOLDER_AMP", _spectre_value(amplitude_v))
+        .replace("PLACEHOLDER_FREQ", _spectre_value(freq_hz))
+        .replace("PLACEHOLDER_A0", _spectre_value(max(cfg.a0_linear, 1.0)))
+        .replace("PLACEHOLDER_A2", _spectre_value(cfg.nl_a2))
+        .replace("PLACEHOLDER_A3", _spectre_value(cfg.nl_a3))
+        .replace("PLACEHOLDER_TSTOP", _spectre_value(duration_s))
+        .replace("PLACEHOLDER_TSTEP", _spectre_value(dt_s))
+        .replace("PLACEHOLDER_WRDATA", wrdata_name)
+    )
+
+
+def run_ngspice_thd(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    template_name: str = "thd_open_loop.cir",
+) -> Path:
+    """Run ngspice THD transient and export waveform ``wrdata``."""
+    repo = package_root()
+    template = repo / "testbench" / "ngspice" / template_name
+    ng_dir = output_dir / "ngspice"
+    logs_dir = output_dir / "logs"
+    ng_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    netlist_path = ng_dir / template_name
+    netlist_path.write_text(
+        render_ngspice_thd_netlist(
+            template,
+            cfg,
+            amplitude_v=amplitude_v,
+            freq_hz=freq_hz,
+            cycles=cycles,
+            dt_s=dt_s,
+            wrdata_name="thd_waveform.raw",
+        ),
+        encoding="utf-8",
+    )
+    wrdata_path = ng_dir / "thd_waveform.raw"
+    log_path = logs_dir / "ngspice_thd.log"
+    executable = find_ngspice_executable()
+    completed = subprocess.run(
+        [executable, "-b", netlist_path.name],
+        cwd=ng_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
+    if completed.returncode != 0:
+        msg = f"ngspice THD TRAN failed with code {completed.returncode}; see {log_path}"
+        raise RuntimeError(msg)
+    if not wrdata_path.is_file():
+        msg = f"ngspice did not produce {wrdata_path}"
+        raise RuntimeError(msg)
+    return wrdata_path
+
+
+def simulate_thd_ngspice(
+    cfg: OpampConfig,
+    output_dir: Path,
+    *,
+    amplitude_v: float,
+    freq_hz: float,
+    cycles: float,
+    dt_s: float,
+    ideal_flag: bool = False,
+    noise: OpampNoiseConfig | None = None,
+) -> tuple[TranSineResult, ThdMetrics | None]:
+    """Run ngspice THD transient and compute distortion metrics from ``wrdata``."""
+    wrdata_path = run_ngspice_thd(
+        cfg,
+        output_dir,
+        amplitude_v=amplitude_v,
+        freq_hz=freq_hz,
+        cycles=cycles,
+        dt_s=dt_s,
+    )
+    data = read_ngspice_tran_wrdata(wrdata_path)
+    zeros = np.zeros_like(data["signal_v"], dtype=np.float64)
+    sine = TranSineResult(
+        time_s=data["time_s"],
+        vout_v=data["signal_v"],
+        vout_clean_v=data["signal_v"],
+        noise_v=zeros,
+    )
+    sine = overlay_transient_noise_on_sine(
+        sine,
+        cfg,
+        noise,
+        amplitude_v=amplitude_v,
+        freq_hz=freq_hz,
+    )
+    thd = None if is_thd_ideal(cfg, ideal_flag=ideal_flag) else compute_thd(
+        sine["time_s"],
+        sine["vout_v"],
+        freq_hz,
+    )
+    return sine, thd
 
 
 def run_ngspice_tran_stub(

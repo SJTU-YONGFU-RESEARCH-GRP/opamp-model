@@ -90,6 +90,11 @@ def resolve_noise_psf_path(raw_dir: Path) -> Path:
     return _resolve_psf_member(raw_dir, extensions=(".noise", ".noi", ".psf"))
 
 
+def resolve_tran_psf_path(raw_dir: Path) -> Path:
+    """Resolve the transient-analysis PSF member inside a Spectre ``.raw`` directory."""
+    return _resolve_psf_member(raw_dir, extensions=(".tran", ".psf"))
+
+
 def locate_ac_psf(netlists_dir: Path, stem: str = "ac_open_loop") -> SpectreAcPsfPaths:
     """Locate PSF files for an AC run under ``output_dir/logs/netlists/``."""
     raw_dir = find_spectre_raw_dir(netlists_dir, stem)
@@ -102,7 +107,10 @@ def locate_ac_psf(netlists_dir: Path, stem: str = "ac_open_loop") -> SpectreAcPs
     )
 
 
-def _complex_trace_data(psf_path: Path, signal: str) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
+def _complex_trace_data(
+    psf_path: Path,
+    signal: str,
+) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
     """Return sweep frequency (Hz) and complex samples for ``signal``."""
     registry = _load_psf_registry(psf_path)
 
@@ -141,6 +149,122 @@ def complex_to_gain_phase(
     gain_db = (20.0 * np.log10(magnitude)).astype(np.float64)
     phase_deg = np.degrees(np.angle(values)).astype(np.float64)
     return gain_db, phase_deg
+
+
+def _read_psfascii_real_trace(
+    psf_path: Path,
+    *,
+    signal: str,
+    sweep_key: str,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Parse PSF ASCII transient/AC files for one real-valued trace."""
+    text = psf_path.read_text(encoding="utf-8", errors="replace")
+    if '"VALUE"' not in text:
+        msg = f"No VALUE section in PSF ASCII file {psf_path}"
+        raise SpectrePsfError(msg)
+
+    sweep_vals: list[float] = []
+    signal_vals: list[float] = []
+    current_sweep: float | None = None
+    in_value = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line == "VALUE":
+            in_value = True
+            continue
+        if not in_value:
+            continue
+        if line == "END":
+            break
+        if line.startswith(f'"{sweep_key}"'):
+            parts = line.split()
+            current_sweep = float(parts[1])
+            continue
+        if line.startswith(f'"{signal}"') and current_sweep is not None:
+            if "(" in line:
+                inner = line[line.index("(") + 1 : line.rindex(")")]
+                re_part = inner.split()[0]
+            else:
+                re_part = line.split()[1]
+            signal_vals.append(float(re_part))
+            sweep_vals.append(current_sweep)
+            current_sweep = None
+
+    if not sweep_vals:
+        msg = f"Signal '{signal}' not found in PSF ASCII file {psf_path}"
+        raise SpectrePsfError(msg)
+    return (
+        np.asarray(sweep_vals, dtype=np.float64),
+        np.asarray(signal_vals, dtype=np.float64),
+    )
+
+
+def _real_trace_data(
+    psf_path: Path,
+    signal: str,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return sweep time (s) and real-valued samples for ``signal``."""
+    try:
+        return _read_psfascii_real_trace(
+            psf_path,
+            signal=signal,
+            sweep_key="time",
+        )
+    except (SpectrePsfError, ValueError):
+        pass
+    registry = _load_psf_registry(psf_path)
+
+    sweep = registry.sweeps[0] if registry.sweeps else None
+    if sweep is None or not sweep.data:
+        msg = f"No time sweep in PSF file {psf_path}"
+        raise SpectrePsfError(msg)
+
+    time_s = np.asarray([float(np.real(z)) for z in sweep.data], dtype=np.float64)
+
+    trace = None
+    for cand in registry.traces:
+        if cand.name == signal:
+            trace = cand
+            break
+    if trace is None:
+        names = ", ".join(t.name for t in registry.traces)
+        msg = f"Signal '{signal}' not in PSF traces ({names})"
+        raise SpectrePsfError(msg)
+
+    values = np.asarray(trace.data, dtype=np.complex128)
+    if values.shape[0] != time_s.shape[0]:
+        msg = (
+            f"PSF sweep length {time_s.shape[0]} != trace '{signal}' "
+            f"length {values.shape[0]}"
+        )
+        raise SpectrePsfError(msg)
+    signal_v = np.real(values).astype(np.float64)
+    return time_s, signal_v
+
+
+def read_spectre_tran_psf(
+    psf_path: Path,
+    *,
+    signal: str = "out",
+) -> dict[str, NDArray[np.float64]]:
+    """Read transient voltage samples from a Spectre PSF file."""
+    time_s, signal_v = _real_trace_data(psf_path, signal)
+    return {
+        "time_s": time_s,
+        "signal_v": signal_v,
+    }
+
+
+def read_spectre_tran_from_netlists(
+    netlists_dir: Path,
+    *,
+    stem: str,
+    signal: str = "out",
+) -> dict[str, NDArray[np.float64]]:
+    """Locate and parse transient PSF under a Spectre netlist run directory."""
+    raw_dir = find_spectre_raw_dir(netlists_dir, stem)
+    psf_path = resolve_tran_psf_path(raw_dir)
+    return read_spectre_tran_psf(psf_path, signal=signal)
 
 
 def read_spectre_ac_psf(
@@ -187,7 +311,6 @@ def read_spectre_supply_transfer_psf(
     frequency_hz, out_values = _complex_trace_data(psf_path, output_signal)
     try:
         _, vdd_values = _complex_trace_data(psf_path, supply_signal)
-        denom = np.maximum(np.abs(vdd_values), 1.0e-30)
         transfer = (out_values / vdd_values).astype(np.complex128)
     except SpectrePsfError:
         transfer = out_values.astype(np.complex128)
@@ -239,6 +362,16 @@ def _pick_noise_trace(registry, signal: str):
     raise SpectrePsfError(msg)
 
 
+def _noise_trace_scalar(value: object) -> float:
+    """Return a scalar noise density from a PSF sample (float or contributor dict)."""
+    if isinstance(value, dict):
+        total = value.get("total")
+        if total is not None:
+            return float(total)
+        return float(sum(float(v) for v in value.values()))
+    return float(np.abs(np.complex128(value)))
+
+
 def read_spectre_noise_psf(
     psf_path: Path,
     *,
@@ -252,16 +385,18 @@ def read_spectre_noise_psf(
         raise SpectrePsfError(msg)
     frequency_hz = np.asarray([float(np.real(z)) for z in sweep.data], dtype=np.float64)
     trace = _pick_noise_trace(registry, signal)
-    values = np.asarray(trace.data, dtype=np.complex128)
-    if values.shape[0] != frequency_hz.shape[0]:
+    magnitude = np.asarray(
+        [_noise_trace_scalar(v) for v in trace.data],
+        dtype=np.float64,
+    )
+    if magnitude.shape[0] != frequency_hz.shape[0]:
         msg = (
             f"PSF sweep length {frequency_hz.shape[0]} != trace '{trace.name}' "
-            f"length {values.shape[0]}"
+            f"length {magnitude.shape[0]}"
         )
         raise SpectrePsfError(msg)
-    magnitude = np.abs(values).astype(np.float64)
-    # Spectre may store V^2/Hz; heuristically sqrt when magnitudes are squared PSD.
-    if np.nanmax(magnitude) > 1.0e-3:
+    # Spectre may store V^2/Hz for some runs; sqrt only when values look like squared PSD.
+    if np.nanmax(magnitude) > 1.0e-3 and np.nanmedian(magnitude) > 1.0e-6:
         magnitude = np.sqrt(np.maximum(magnitude, 0.0))
     return {
         "frequency_hz": frequency_hz,

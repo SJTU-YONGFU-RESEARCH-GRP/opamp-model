@@ -1,6 +1,6 @@
 * Common-mode AC Bode — ngspice macromodel (ACM path).
 *
-* Stimulus: inp tied to inn; both carry common-mode AC (differential AC = 0).
+* Stimulus: inp follows inn (Elink inp 0 inn 0 1); common-mode AC on inn only.
 * Target: ACM(s) = Aol(s) / CMRR_LINEAR with same fp2/fz shaping as diff path.
 *
 *   ACM_gain = A0_LINEAR / CMRR_LINEAR
@@ -23,7 +23,7 @@
 VDD vdd 0 DC 1.8
 VSS vss 0 DC 0
 VCM inn 0 DC 0.9 AC 1
-Elink inp inn inn 0 1
+Elink inp 0 inn 0 1
 Rinn inn 0 {rin_ohm}
 Rinp inp 0 {rin_ohm}
 
