@@ -4,14 +4,14 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776ab.svg)](https://www.python.org/downloads/)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue?logo=semver&logoColor=white)](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model)
 
-Configurable **voltage op-amp**, **transimpedance (TIA)**, and **transconductance (Gm)** behavioral models with a Python package, Verilog-A shells, and SPICE/Spectre testbenches. Peer engines (Python, ngspice, Spectre) implement the same macromodel equations documented in [docs/MODEL.md](docs/MODEL.md).
+**Configurable behavioral macromodels for amplifiers** — voltage op-amps, transimpedance (TIA), and transconductance (Gm) blocks — with one shared equation set across Python, ngspice, and Cadence Spectre.
 
-**Repository:** [SJTU-YONGFU-RESEARCH-GRP/amplifier-model](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model) (this package lives in the `opamp-model/` directory)
+From a single parameter set you can run AC/STB, noise, CMRR/PSRR, slew, and THD benches; compare engines peer-to-peer (no golden simulator); and ship a typed Python API, Verilog-A shells, and SPICE/Spectre testbenches. Macromodel equations and parity rules are documented in [docs/MODEL.md](docs/MODEL.md).
 
-- **License:** CC BY 4.0 (see [LICENSE](LICENSE))
-- **Planned:** TIA/Gm benches, Spectre PSF / full ngspice noise parsers (see [docs/metrics_catalog.md](docs/metrics_catalog.md))
-
-**Status:** Full macromodel on **python** (AC/STB, noise, CMRR/PSRR, slew, THD). **ngspice** parses AC/STB Bode from netlists; **spectre** runs decks but AC/noise curves are still Python-backed until PSF parsers land. Details: [docs/README.md](docs/README.md#quick-reference).
+- **Repository:** [SJTU-YONGFU-RESEARCH-GRP/amplifier-model](https://github.com/SJTU-YONGFU-RESEARCH-GRP/amplifier-model) (`opamp-model/` subdirectory)
+- **License:** CC BY 4.0 ([LICENSE](LICENSE))
+- **Engines:** **python** — full macromodel; **ngspice** — AC/STB Bode from netlists; **spectre** — AC/STB via PSF; noise is hybrid on SPICE engines; PSRR and transient benches are Python-backed today — [quick reference](docs/README.md#quick-reference)
+- **Planned:** Full ngspice/Spectre noise transfer, expanded TIA/Gm parity ([docs/metrics_catalog.md](docs/metrics_catalog.md))
 
 ## Table of contents
 
